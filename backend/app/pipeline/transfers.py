@@ -3,7 +3,8 @@
 - Debit + credit both visible on the user's own accounts -> transfer_self (neither income nor spend).
 - A transfer to an account we can't see counts as spend: card bill to an unlinked card ->
   card_bill_unlinked; self-transfer to an unseen account -> transfer_unseen.
-- A payment to a LINKED card is a transfer even if its credit leg is outside the data window.
+- D19: a card bill payment is a transfer iff the card is VISIBLE on the payment date (we hold its
+  transactions from any source: AA, statement or SMS), even if the credit leg isn't in our data.
 - Loan legs never pair: the EMI debit stays `emi` (debt service); loan-account legs are excluded.
 """
 from __future__ import annotations
@@ -40,8 +41,19 @@ def card_for_bill(t: PTxn, accounts: list[PAccount]) -> PAccount | None:
     return None
 
 
+def visible_from(txns: list[PTxn]) -> dict[str, object]:
+    """account_id -> date of the first transaction we hold for it (any source)."""
+    out: dict[str, object] = {}
+    for t in txns:
+        a = t.account.account_id
+        if a not in out or t.date < out[a]:
+            out[a] = t.date
+    return out
+
+
 def match_transfers(txns: list[PTxn], user_id: str, accounts: list[PAccount]) -> None:
     """Sets category/transfer_group_id in place on matched and unmatched transfer legs."""
+    seen_from = visible_from(txns)
     debits = [t for t in txns if t.direction == "debit"]
     credits = [t for t in txns if t.direction == "credit"]
     used: set[int] = set()
@@ -61,8 +73,8 @@ def match_transfers(txns: list[PTxn], user_id: str, accounts: list[PAccount]) ->
             continue
         if _is_card_bill(t):
             card = card_for_bill(t, accounts)
-            linked = card is not None and card.link_status == "linked"
-            t.category = "transfer_self" if linked else "card_bill_unlinked"
+            visible = card is not None and card.account_id in seen_from and seen_from[card.account_id] <= t.date
+            t.category = "transfer_self" if visible else "card_bill_unlinked"
             t.category_source, t.category_confidence = "rule", 1.0
         elif t.account.kind == "credit_card" and t.direction == "credit" and "card_payment_received" in t.signatures:
             t.category, t.category_source, t.category_confidence = "transfer_in_unseen", "rule", 1.0

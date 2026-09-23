@@ -3,6 +3,7 @@ import datetime as dt
 from sqlalchemy import select
 
 from app.db.models import Account, Transaction, TransactionSource
+from app.demo.personas import PersonaA, build_persona_a
 from app.demo.scenario import persona_a_steps
 from app.ingest.registry import adapter_for
 from app.ingest.service import ingest_batch
@@ -134,7 +135,8 @@ def _apply(session, step, clock, categoriser):
 
 
 def test_linking_the_card_reclassifies_history(session, clock, categoriser):
-    steps = persona_a_steps()
+    """Variant of persona A whose card sends no SMS: the card is invisible until linked (D4)."""
+    steps = persona_a_steps(build_persona_a(PersonaA(card_sms=False)))
     _apply(session, steps[0], clock, categoriser)
     q = lambda: list(session.scalars(select(Transaction).where(Transaction.user_id == "demo-a")))
     t0 = q()
@@ -158,3 +160,81 @@ def test_linking_the_card_reclassifies_history(session, clock, categoriser):
     assert any(t.category == "card_interest" for t in card_txns)
     purchases = sum(t.amount_paise for t in card_txns if t.direction == "debit")
     assert purchases > sum(t.amount_paise for t in bills)  # revolving debt was funding spend (D4)
+
+
+# ---- D20 dedupe precision (negatives alongside recall) ------------------------------------------------
+SWIGGY = "UPI/DR/1/SWIGGY/YESB/swiggy@axisbank/Payment"
+OTHER = PAccount("acc_other", "savings", "hdfc", "9999")  # a second HDFC account
+
+
+def _sms(rid, amount=45000, date=D, account="acc_sal", merchant="SWIGGY", ref=None):
+    return raw(rid, "sms", f"SMS/{merchant}", amount=amount, date=date, account=account, merchant_hint=merchant,
+               reference=ref, channel_hint="upi")
+
+
+def test_two_genuine_identical_pairs_stay_two_and_match_one_to_one():
+    res = _run([raw("a1", "aa", SWIGGY), raw("a2", "aa", SWIGGY), _sms("s1"), _sms("s2")])
+    assert len(res.txns) == 2 and res.duplicates_merged == 2
+    assert sorted(sorted(s.source for s in t.sources) for t in res.txns) == [["aa", "sms"], ["aa", "sms"]]
+
+
+def test_sms_without_aa_counterpart_survives():
+    res = _run([raw("a1", "aa", SWIGGY), _sms("s1"), _sms("s_only", amount=61000, merchant="ZOMATO")])
+    assert len(res.txns) == 2
+    lone = next(t for t in res.txns if t.raw.raw_id == "s_only")
+    assert [s.source for s in lone.sources] == ["sms"] and lone.merchant_key == "zomato"
+
+
+def test_sms_never_merges_into_another_accounts_transaction():
+    res = _run([raw("a1", "aa", SWIGGY), _sms("s1", account="acc_other")], accounts=(SAL, SAV, OTHER))
+    assert len(res.txns) == 2 and res.duplicates_merged == 0
+
+
+def test_same_reference_different_amount_is_not_merged():
+    res = _run([raw("a1", "aa", SWIGGY, reference="412345678901"), _sms("s1", amount=45100, ref="412345678901")])
+    assert len(res.txns) == 2
+
+
+# ---- D19 card visibility from SMS -------------------------------------------------------------------
+CARD = PAccount("acc_card", "credit_card", "axis", "9012", "sms_only")
+BILL = "BIL/ONL/412345/AXIS BANK CREDIT CARD/XXXXXXXXXXXX9012"
+
+
+def test_card_sms_before_statement_link_counts_once():
+    d0 = dt.date(2026, 8, 10)
+    sms_spends = [raw(f"cs{i}", "sms", "SMS/AMAZON PAY INDIA", amount=250000, date=d0 + dt.timedelta(days=i),
+                      account="acc_card", merchant_hint="AMAZON PAY INDIA", channel_hint="card") for i in range(3)]
+    bill = raw("bill", "aa", BILL, amount=750000, date=dt.date(2026, 9, 7))
+    # before linking: SMS spends count as spend, the bill payment is a transfer (card visible since Aug 10)
+    res = _run([*sms_spends, bill], accounts=(SAL, SAV, CARD))
+    cats = {t.raw.raw_id: t.category for t in res.txns}
+    assert cats["bill"] == "transfer_self" and {cats[f"cs{i}"] for i in range(3)} == {"shopping"}
+    # after linking the statement: the AA copies dedupe with the SMS, interest appears, still nothing twice
+    linked = PAccount("acc_card", "credit_card", "axis", "9012", "linked")
+    aa_copies = [raw(f"ca{i}", "aa", "AMAZON PAY INDIA PUNE", amount=250000, date=d0 + dt.timedelta(days=i),
+                     account="acc_card") for i in range(3)]
+    extra = [raw("int", "aa", "FINANCE CHARGES", amount=120000, date=dt.date(2026, 8, 18), account="acc_card"),
+             raw("pay", "aa", "PAYMENT RECEIVED - THANK YOU", amount=750000, direction="credit",
+                 date=dt.date(2026, 9, 7), account="acc_card")]
+    res2 = _run([*sms_spends, bill, *aa_copies, *extra], accounts=(SAL, SAV, linked))
+    spend = [t for t in res2.txns if t.category in ("shopping", "card_interest")]
+    assert len(spend) == 4 and sum(t.amount for t in spend) == 3 * 250000 + 120000
+    assert {t.raw.source for t in res2.txns if t.category == "shopping"} == {"aa"}
+
+
+def test_bill_before_card_is_visible_is_spend():
+    late_sms = raw("cs", "sms", "SMS/AMAZON PAY INDIA", amount=250000, date=dt.date(2026, 9, 10), account="acc_card",
+                   merchant_hint="AMAZON PAY INDIA", channel_hint="card")
+    early_bill = raw("bill", "aa", BILL, amount=750000, date=dt.date(2026, 9, 7))
+    res = _run([late_sms, early_bill], accounts=(SAL, SAV, CARD))
+    assert {t.raw.raw_id: t.category for t in res.txns}["bill"] == "card_bill_unlinked"
+
+
+def test_uncategorised_below_threshold_is_essential(categoriser):
+    from app.engines.view import category_flags
+
+    res = run_pipeline("u1", [raw("x", "aa", "UPI/DR/1/ZQXW HOLDINGS/YESB/zqxw@ybl/Payment", amount=99900)],
+                       [SAL], categoriser)
+    t = res.txns[0]
+    assert t.category == "uncategorised" and t.category_source == "ml" and t.category_confidence < 0.9
+    assert category_flags()["uncategorised"]["essential"] and category_flags()["uncategorised"]["spend"]

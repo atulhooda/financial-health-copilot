@@ -45,7 +45,7 @@ class PersonaA:
     hike_from: dt.date = dt.date(2026, 10, 1)
     sal_opening: int = 14_000
     sav_opening: int = 38_000
-    sweep_to_savings: int = 4_000  # monthly self-transfer on day 2
+    sweep_to_savings: int = 8_000  # monthly self-transfer on day 2
     rent: int = 24_000
     landlord: str = "RAMESH KULKARNI"
     sip: int = 5_000
@@ -56,17 +56,21 @@ class PersonaA:
     card_limit: int = 150_000
     card_opening_carry: int = 12_000
     card_monthly_rate: float = 0.035
-    card_pay_ratio: float = 0.32
+    card_pay_ratio: float = 0.30
     card_statement_day: int = 18
     card_due_days: int = 20
     ott: list = field(default_factory=lambda: [("NETFLIX", "netflix@hdfcbank", 649, 12),
                                                ("AMAZON PRIME", "amazonprime@apl", 299, 16),
                                                ("JIOHOTSTAR", "jiohotstar@icici", 299, 22)])
     sms_share: float = 0.15
+    # D19 decision (docs/DEMO.md): Android SMS permission is all-or-nothing, so the phone sees the Axis card's
+    # spend SMS from day one. The card is therefore VISIBLE at T0 (sms_only); linking at +1 reveals the
+    # statement: revolving balance, interest/GST, limit and utilisation, not the purchases.
+    card_sms: bool = True
     # "Spend what's in the account": on weekends, spend this share of the operating balance above
     # (obligations due in the next 14 days + threshold). Models the behaviour D7's sweep assumption names.
     spend_down_share: float = 0.6
-    spend_down_threshold: int = 16_000
+    spend_down_threshold: int = 20_000
     spend_down_merchants: list = field(default_factory=lambda: [
         ("CROMA", "croma@hdfcbank"), ("DECATHLON", "decathlon@icici"), ("MAKEMYTRIP", "makemytrip@icici"),
         ("AMAZON", "amazon@apl"), ("BOOKMYSHOW", "bookmyshow@axisbank"), ("VAISHALI RESTAURANT", "vaishali@paytm")])
@@ -250,7 +254,10 @@ def build_persona_a(p: PersonaA | None = None) -> World:
                 payee, vpa = sp.merchants[int(rng.integers(len(sp.merchants)))]
                 amount = _amount(rng, sp.median_rupees, sp.sigma)
                 if sp.channel == "card":
-                    w.debit("card", day, amount, f"{payee} PUNE", "CARD")
+                    if w.can_debit("card", amount):
+                        avl = w.accounts["card"].summary["creditLimit_paise"] - w.balance["card"] - amount
+                        sms = sms_text("axis", "card_spend", "9012", amount, day, payee, None, avl) if p.card_sms else None
+                        w.debit("card", day, amount, f"{payee} PUNE", "CARD", sms=sms)
                 elif sp.channel == "atm":
                     w.debit("sal", day, amount, f"ATW-{sal4}-HDFC ATM KOTHRUD PUNE", "ATM")
                 else:
@@ -363,6 +370,8 @@ class PersonaC:
     maid: int = 8_000
     sip: int = 15_000
     card_limit: int = 300_000
+    annual_prime: tuple = (dt.date(2026, 5, 14), 1_499)  # annual plan: detectable from a single charge (D23)
+    netflix_monthly: int = 199
     spends: dict = field(default_factory=lambda: {
         "card": Spend(24, 1400, 0.8, [("DMART AVENUE SUPERMARTS", ""), ("BIGBASKET", ""), ("IOCL SAKET", ""),
                                       ("AMAZON PAY INDIA", ""), ("DOMINOS PIZZA", ""), ("LAJPAT TEXTILES", ""),
@@ -431,6 +440,10 @@ def build_persona_c(p: PersonaC | None = None) -> World:
                 w.debit("sal", day, pay, f"BIL/ONL/{ref[:6]}/HDFC BANK CREDIT CARD/XXXXXXXXXXXX7711", "FT",
                         ref=ref, force=True)
                 w.credit("card", day, pay, "PAYMENT RECEIVED - THANK YOU", "OTHERS")
+        if day == p.annual_prime[0]:
+            w.debit("card", day, p.annual_prime[1] * 100, "AMAZON PRIME MEMBERSHIP NEW DELHI", "CARD")
+        if day.day == 9:
+            w.debit("card", day, p.netflix_monthly * 100, "NETFLIX.COM MUMBAI", "CARD")
         for name in sorted(p.spends):
             sp = p.spends[name]
             lam = sp.per_month / 30.4 * (sp.weekend_boost if day.weekday() >= 5 else 1.0)

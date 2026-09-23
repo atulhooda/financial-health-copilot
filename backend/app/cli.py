@@ -13,12 +13,13 @@ app = typer.Typer(no_args_is_help=True, help="Hisaab backend CLI")
 @app.command("train-categoriser")
 def train_categoriser() -> None:
     """Train the ML fallback categoriser, save the artefact and write docs/CATEGORISER.md."""
+    from app.core.config import load_yaml
     from app.pipeline.categorise.train import train_and_evaluate, write_report
 
     model, metrics = train_and_evaluate()
     model.save()
-    write_report(metrics, REPO_DIR / "docs" / "CATEGORISER.md")
-    typer.echo(json.dumps({k: metrics[k] for k in ("unseen_merchants", "unseen_merchant_types")}, indent=1))
+    write_report(metrics, REPO_DIR / "docs" / "CATEGORISER.md", load_yaml("categories")["ml_min_confidence"])
+    typer.echo(json.dumps(metrics["unseen_merchant_types"], indent=1))
 
 
 @app.command()
@@ -49,21 +50,26 @@ def seed() -> None:
 
 @app.command()
 def demo() -> None:
-    """Replay persona A: T0 -> +1 -> +2 -> +3 (docs/DEMO.md). Phase 1: ingest + pipeline per step."""
-    from sqlalchemy import func, select
-
+    """Replay persona A: T0 -> +1 -> +2 -> +3 (docs/DEMO.md). Phase 2: facts, score and new-data attribution."""
     from app.core.clock import FixedClock, set_clock
-    from app.db.models import Account, Transaction
+    from app.core.money import format_inr
     from app.db.repo import UserRepo
     from app.db.session import session_scope
     from app.demo.scenario import persona_a_steps
+    from app.engines.attribution import attribute_change
+    from app.engines.financial import compute_metrics
+    from app.engines.score import compute_score
+    from app.engines.view import build_view
     from app.ingest.registry import adapter_for
-    from app.ingest.service import ingest_batch
+    from app.ingest.service import ingest_batch, next_ingest_seq
     from app.pipeline.categorise.train import get_categoriser
 
     cat = get_categoriser()
+    fmt = lambda p: "n/a" if p is None else format_inr(p)  # noqa: E731
+    pct = lambda x: "n/a" if x is None else f"{x * 100:.1f}%"  # noqa: E731
     with session_scope() as s:
         UserRepo(s, "demo-a").erase_all()
+    prev = None
     for step in persona_a_steps():
         clock = FixedClock(step.as_of)
         set_clock(clock)
@@ -71,12 +77,42 @@ def demo() -> None:
             with session_scope() as s:
                 ingest_batch(s, "demo-a", adapter_for(source, clock).parse(payload, "demo-a"), cat, clock)
         with session_scope() as s:
-            n = s.scalar(select(func.count()).select_from(Transaction).where(Transaction.user_id == "demo-a"))
-            accts = UserRepo(s, "demo-a").select(Account)
-            linked = sum(a.link_status == "linked" for a in accts)
-        typer.echo(f"[{step.name:>2}] as_of {step.as_of}  {step.label}\n"
-                   f"     canonical txns={n}  accounts linked {linked}/{len(accts)}")
-    typer.echo("Snapshots, diffs and recommendation changes arrive in Phase 4.")
+            seq = next_ingest_seq(UserRepo(s, "demo-a")) - 1
+            v = build_view(s, "demo-a", step.as_of, cat)
+            m = compute_metrics(v)
+            sc = compute_score(m)
+            att = attribute_change(s, "demo-a", cat, prev[0], prev[1], step.as_of, seq) if prev else None
+        accts = [a for a in v.accounts.values() if a.institution != "cash"]
+        typer.echo(f"\n[{step.name:>2}] as_of {step.as_of}  {step.label}")
+        typer.echo(f"     accounts linked {sum(a.linked for a in accts)}/{len(accts)} "
+                   f"(visible {sum(a.visible for a in accts)})   score {sc.total} {sc.band} "
+                   f"(pillar coverage {sc.score_coverage}%)")
+        typer.echo(f"     income {fmt(m.income_monthly_paise)}  spend {fmt(m.spend_monthly_paise)}  "
+                   f"savings rate {pct(m.savings_rate)}  buffer {m.buffer_months and round(m.buffer_months, 1)} mo  "
+                   f"EMI/income {pct(m.emi_to_income)}  revolving {fmt(m.revolving_paise)}")
+        typer.echo("     pillars " + "  ".join(f"{p.key}={p.contribution if p.status == 'ok' else '-'}"
+                                             for p in sc.pillars))
+        if att:
+            tag = "NEW_DATA_REVEALED " if att.new_data_revealed else ""
+            typer.echo(f"     change {sc.total - att.score['prev']:+d} = behaviour/time {att.score['behaviour']:+d}"
+                       f" + new data {att.score['new_data']:+d}  {tag}")
+        prev = (step.as_of, seq)
+    typer.echo("\nSnapshots, forecasts and recommendation changes arrive in Phases 3-4.")
+
+
+@app.command("mask-sms")
+def mask_sms_cmd(path: str) -> None:
+    """Mask real SMS (one per blank-line-separated block) for use as fixtures (SPEC D28). Review the output."""
+    from pathlib import Path
+
+    from app.ingest.sms_mask import mask_sms
+
+    for block in [b for b in Path(path).read_text().split("\n\n") if b.strip()]:
+        masked, review = mask_sms(block.strip())
+        typer.echo(masked)
+        if review:
+            typer.echo(f"  !! possible names, mask by hand: {review}")
+        typer.echo("")
 
 
 if __name__ == "__main__":

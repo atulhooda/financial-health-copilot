@@ -1,0 +1,10 @@
+# Subscription groups come from `subscription_group` in merchants.yaml.
+# Annual plans: a single charge within 10% of a listed price is detected as an annual subscription (SPEC §6.2, D23).
+annual_plans:
+  amazon_prime: [1499, 799]      # Prime annual, Prime Lite annual
+  jiohotstar: [1499, 899]
+  sonyliv: [1499, 999]
+  zee5: [1199, 699]
+  spotify: [1189]
+  youtube_premium: [1490]
+annual_price_tolerance: 0.10

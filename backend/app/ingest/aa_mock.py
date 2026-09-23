@@ -57,12 +57,15 @@ class AAMockAdapter:
             kind = FI_KIND.get(fi_type) or ("current" if acct.get("type", "").upper() == "CURRENT" else "savings")
             hint = AccountHint(institution=institution_code(acct["fipName"]), masked_number=masked, kind=kind)
             batch.accounts.append(self._account_info(hint, fi))
-            for i, t in enumerate(fi.get("transactions", [])):
-                d = _ts_date(t["transactionTimestamp"])
+            for t in fi.get("transactions", []):
+                ts = dt.datetime.fromisoformat(t["transactionTimestamp"])
+                d = ts.date()
                 if not (consent.data_from <= d <= consent.data_to):
                     continue
                 batch.transactions.append(RawTransaction(
-                    source="aa", source_ref=t["txnId"], account=hint, txn_date=d, seq=i,
+                    # intra-day order = time of day, so a day split across two fetches still sorts correctly
+                    source="aa", source_ref=t["txnId"], account=hint, txn_date=d,
+                    seq=ts.hour * 3600 + ts.minute * 60 + ts.second,
                     amount_paise=parse_inr(t["amount"]),
                     direction="debit" if t["type"].upper() == "DEBIT" else "credit",
                     narration=t.get("narration", ""), reference=t.get("reference") or None,

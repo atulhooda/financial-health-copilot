@@ -26,7 +26,7 @@ Status: **Approved 2026-09-23 (floor per SPEC D17).** Parameters live in `backen
 |---|---|---|---|
 | 0 | 50 | 75 | 100 |
 
-**P2 Emergency buffer (months of essential spend)**
+**P2 Emergency buffer (months of essential spend)**. Liquid balance excludes loan disbursals from the last 90 days (SPEC D29), and essential spend includes Uncategorised (D21).
 | 0 | 1 | 3 | ≥ 6 |
 |---|---|---|---|
 | 0 | 30 | 70 | 100 |
@@ -43,7 +43,7 @@ Base score from overall utilisation:
 |---|---|---|---|
 | 100 | 75 | 40 | 0 |
 Then, if `revolving_balance > 0`, P4 = min(base, 40). Carrying a balance at ~3.5%/month is the costliest habit we can detect.
-No card known → excluded. Card known but unlinked → excluded, and the known-unlinked card lowers forecast *confidence* instead.
+No card known → excluded (`no credit card`). Card known but not linked, **including a card visible only through SMS** (no limit, no statement) → excluded (`card not linked`), and it lowers forecast *confidence* instead.
 
 **P5 Pre-salary liquidity (observed).** Over the last ≤6 complete pay cycles (calendar months if income is irregular), a cycle is **clean** if the operating balance never went below the safety floor and no bounce/return charge was posted.
 `P5 = 100 × clean_cycles / cycles − 25 × observed_bounce_charges`, clamped to 0–100. Needs ≥2 cycles.

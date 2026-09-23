@@ -45,7 +45,7 @@ Assumption { "id": "A1", "key": "consumer_emi_rate", "text": "Assumed interest r
 ## 2. Endpoints
 
 ### GET `/v1/home`
-`data`: `{ score: Quantity, band: "Poor|Fair|Good", score_coverage: Quantity, pillars: [{ key, title, weight, value: Quantity, pillar_score, contribution, status: "ok|insufficient_data" }], top_drag: key, top_alert: { kind: "bounce_risk|dip_risk|high_cost_debt|overlap|drift", ref: "P1|F9|..." } | null, linked_accounts: count, known_accounts: count }`
+`data`: `{ score: Quantity, band: "Poor|Fair|Good", score_coverage: Quantity, pillars: [{ key, title, weight, value: Quantity, pillar_score, contribution, status: "ok|insufficient_data" }], top_drag: key, top_alert: { kind: "bounce_risk|dip_risk|high_cost_debt|overlap|drift", ref: "P1|F9|..." } | null, linked_accounts: count, visible_accounts: count, known_accounts: count, accounts: [{ account_id, kind, institution, masked, status: "linked|sms_only|known_unlinked", role }] }`
 Facts: score, band and pillar contributions. Predictions: dip probability (if > 20%). Recommendations: the top 1.
 
 ### GET `/v1/insights`
@@ -90,6 +90,9 @@ Response:
 - `sms`: `{ "transactions": [StructuredSmsTxn] }`, **structured only**. Any unknown field (e.g. `body`, `text`) → 422 (`extra="forbid"`).
 - `manual`: `{ "transactions": [ManualTxn] }`.
 Response `202`: `{ "ingest_id", "raw_count", "canonical_new", "duplicates_merged", "event_id" }`. Recompute is asynchronous. The app polls `/v1/timeline` (or passes `?wait=true` for up to 10 s of synchronous wait, as the demo does).
+
+### POST `/v1/merchant-rules`
+A user correction (SPEC D21). Body: `{ "merchant_key": "m:vaishali_restaurant", "category": "dining" }` (or `{ "txn_id", "category" }`, which resolves to that transaction's merchant). It applies to past and future transactions of that merchant (`category_source: "user"`) and triggers a recompute (`data.ingested` with `source: "user_rule"`). The category list comes from `config/categories.yaml` and includes `uncategorised` (low-confidence ML, counted as essential).
 
 ### DELETE `/v1/user/data`
 DPDP erasure. It deletes every row for the user in every table (SPEC D14). Response `200`: `{ "erased": { "transactions": 1234, ... }, "receipt_id", "erased_at" }`. Only the anonymous global validator-block counter survives (SPEC D14).

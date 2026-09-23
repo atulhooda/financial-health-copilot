@@ -123,7 +123,7 @@ class World:
                 "transactions": [{
                     "txnId": t.txn_id, "type": t.direction.upper(), "mode": t.mode,
                     "amount": f"{t.amount / 100:.2f}", "currentBalance": f"{t.balance_after / 100:.2f}",
-                    "transactionTimestamp": f"{t.date.isoformat()}T{9 + min(t.seq, 12):02d}:{(t.seq * 7) % 60:02d}:00+05:30",
+                    "transactionTimestamp": f"{t.date.isoformat()}T{8 + t.seq // 60:02d}:{t.seq % 60:02d}:00+05:30",
                     "valueDate": t.date.isoformat(), "narration": t.narration, "reference": t.ref or "",
                 } for t in txns],
             })
@@ -196,4 +196,8 @@ def sms_text(bank: str, kind: str, acct_last4: str, amount: int, date: dt.date, 
     if bank == "sbi" and kind == "upi_debit":
         return ("BZ-SBIUPI", f"Dear UPI user A/C X{acct_last4} debited by {amount / 100:.1f} on date "
                              f"{date:%d%b%y} trf to {payee} Refno {ref}. If not u? call 1800111109. -SBI")
+    if bank == "axis" and kind == "card_spend":
+        return ("AX-AXISBK", f"Spent INR {_amt(amount)}\nAxis Bank Card no. XX{acct_last4}\n{date:%d-%m-%y} "
+                             f"19:{(amount // 100) % 60:02d}:10 IST\n{payee}\nAvl Limit: INR {_amt(max(avl, 0))}\n"
+                             f"Not you? SMS BLOCK {acct_last4} to 919951860002")
     raise ValueError(f"no SMS template for {bank}/{kind}")

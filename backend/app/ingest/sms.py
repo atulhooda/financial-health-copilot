@@ -91,7 +91,7 @@ class SmsAdapter:
             kind = "credit_card" if p["kind"] == "card_spend" else "savings"
             hint = AccountHint(institution=p["bank"], masked_number=f"XX{t.account_last4}", kind=kind)
             if (hint.institution, hint.last4, kind) not in seen:
-                batch.accounts.append(AccountInfo(hint=hint, known_via="sms"))
+                batch.accounts.append(AccountInfo(hint=hint, known_via="sms", link_status="sms_only"))
                 seen.add((hint.institution, hint.last4, kind))
             channel = "nach" if p["kind"] == "emi" else ("card" if kind == "credit_card" else
                                                           ("upi" if t.reference else None))

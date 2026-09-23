@@ -9,9 +9,11 @@ from app.core.clock import Clock, get_clock
 from app.core.ids import stable_id
 from app.db.models import (
     Account,
+    AccountState,
     Balance,
     Consent,
     Counterparty,
+    MerchantRule,
     RawTransactionRow,
     Transaction,
     TransactionSource,
@@ -39,6 +41,9 @@ class IngestResult:
     duplicates_merged: int
 
 
+LINK_RANK = {"known_unlinked": 0, "sms_only": 1, "linked": 2}
+
+
 def account_id_for(user_id: str, hint: AccountHint) -> str:
     return stable_id("acc", user_id, hint.institution, hint.kind_group, hint.last4)
 
@@ -52,8 +57,8 @@ def _upsert_account(repo: UserRepo, info: AccountInfo) -> Account:
                       role="liability" if info.hint.kind in ("credit_card", "loan") else None,
                       link_status=info.link_status, known_via=info.known_via, extra={})
         repo.add(row)
-    elif info.link_status == "linked" and row.link_status != "linked":
-        row.link_status, row.known_via = "linked", info.known_via
+    elif LINK_RANK[info.link_status] > LINK_RANK.get(row.link_status, 0):
+        row.link_status, row.known_via = info.link_status, info.known_via
     for f in META_FIELDS:
         v = getattr(info, f)
         if v is not None:
@@ -82,6 +87,19 @@ def _upsert_holders(repo: UserRepo, names: list[str]) -> None:
         known.add(key)
 
 
+def next_ingest_seq(repo: UserRepo) -> int:
+    seqs = [r.ingest_seq for r in repo.select(RawTransactionRow)] + [s.ingest_seq for s in repo.select(AccountState)]
+    return max(seqs, default=0) + 1
+
+
+def _state_fields(info: AccountInfo) -> dict:
+    out = {f: getattr(info, f) for f in META_FIELDS if getattr(info, f) is not None}
+    if info.balance_paise is not None:
+        out["balance_paise"] = info.balance_paise
+        out["balance_date"] = info.balance_date
+    return {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in out.items()}
+
+
 def ingest_batch(session: Session, user_id: str, batch: IngestBatch, categoriser: Categoriser | None,
                  clock: Clock | None = None) -> IngestResult:
     clock = clock or get_clock()
@@ -97,10 +115,16 @@ def ingest_batch(session: Session, user_id: str, batch: IngestBatch, categoriser
                              purpose_text=c.purpose_text, fi_types=c.fi_types, scope_accounts=c.scope_accounts,
                              data_from=c.data_from, data_to=c.data_to, expires_at=c.expires_at, status="ACTIVE"))
 
+    seq = next_ingest_seq(repo)
     holder_names: list[str] = []
     for info in batch.accounts:
         _upsert_account(repo, info)
         holder_names += info.holder_names
+        if info.known_via in ("aa", "statement"):
+            state_date = info.balance_date or (batch.consent.data_to if batch.consent else None) or clock.today()
+            repo.add(AccountState(user_id=user_id, account_id=account_id_for(user_id, info.hint), ingest_seq=seq,
+                                  as_of_date=state_date, received_at=clock.now(), source=info.known_via,
+                                  fields=_state_fields(info)))
     if holder_names:
         _upsert_holders(repo, holder_names)
         if not user.display_name:
@@ -124,7 +148,7 @@ def ingest_batch(session: Session, user_id: str, batch: IngestBatch, categoriser
             account_id=account_id_for(user_id, t.account), txn_date=t.txn_date, seq=t.seq,
             amount_paise=t.amount_paise, direction=t.direction, narration=t.narration, merchant_hint=t.merchant_hint,
             reference=t.reference, balance_after_paise=t.balance_after_paise, channel_hint=t.channel_hint,
-            category_hint=t.category_hint, payload_hash=t.payload_hash(), received_at=clock.now()))
+            category_hint=t.category_hint, payload_hash=t.payload_hash(), received_at=clock.now(), ingest_seq=seq))
     session.flush()
     canonical, merged = recompute_user(session, user_id, categoriser)
     return IngestResult(ingest_id, len(batch.transactions), new, canonical, merged)
@@ -147,7 +171,8 @@ def recompute_user(session: Session, user_id: str, categoriser: Categoriser | No
     existing = [CounterpartyOut(c.pseudonym, c.kind, c.name, list(c.match_keys), c.first_seen)
                 for c in cps if c.kind == "contact"]
 
-    res = run_pipeline(user_id, raws, paccs, categoriser, holders, existing)
+    rules = {r.merchant_key: r.category for r in repo.select(MerchantRule)}
+    res = run_pipeline(user_id, raws, paccs, categoriser, holders, existing, rules)
 
     known_ids = {a.account_id for a in accounts}
     for a in res.inferred_accounts:
@@ -183,3 +208,21 @@ def recompute_user(session: Session, user_id: str, categoriser: Categoriser | No
                                        is_canonical=s is t.raw))
     session.flush()
     return len(res.txns), res.duplicates_merged
+
+
+def set_merchant_rule(session: Session, user_id: str, merchant_key: str, category: str,
+                      categoriser: Categoriser | None, clock: Clock | None = None) -> None:
+    """A user's correction becomes a per-user merchant rule (D21), then history is recomputed."""
+    from app.core.config import load_yaml
+
+    if category not in load_yaml("categories")["categories"]:
+        raise ValueError(f"unknown category {category!r}")
+    clock = clock or get_clock()
+    repo = UserRepo(session, user_id)
+    row = repo.get(MerchantRule, merchant_key=merchant_key)
+    if row is None:
+        repo.add(MerchantRule(user_id=user_id, merchant_key=merchant_key, category=category, created_at=clock.now()))
+    else:
+        row.category, row.created_at = category, clock.now()
+    session.flush()
+    recompute_user(session, user_id, categoriser)

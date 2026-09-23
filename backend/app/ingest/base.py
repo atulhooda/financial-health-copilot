@@ -36,7 +36,7 @@ class AccountInfo(BaseModel):
     """Account metadata a source can vouch for (AA summaries, statement headers)."""
 
     hint: AccountHint
-    link_status: Literal["linked", "known_unlinked"] = "linked"
+    link_status: Literal["linked", "sms_only", "known_unlinked"] = "linked"
     known_via: Literal["aa", "statement", "sms", "manual", "inferred"]
     credit_limit_paise: int | None = None
     min_balance_paise: int | None = None

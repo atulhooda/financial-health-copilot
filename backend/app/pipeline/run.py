@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from app.core.config import load_yaml
 from app.core.ids import stable_id
 from app.core.pii import mask_names, mask_regex
 from app.ingest.base import institution_code
@@ -16,8 +17,6 @@ from app.pipeline.dedupe import dedupe
 from app.pipeline.merchants import clean, parse_narration, resolve
 from app.pipeline.transfers import card_for_bill, match_transfers
 from app.pipeline.types import PAccount, PRaw, PTxn
-
-ML_MIN_CONFIDENCE = 0.5
 
 
 @dataclass
@@ -86,7 +85,8 @@ def masked_narration(t: PTxn, names: dict[str, str]) -> str:
 
 
 def run_pipeline(user_id: str, raws: list[PRaw], accounts: list[PAccount], categoriser: Categoriser | None,
-                 holder_names: list[str] = (), existing_counterparties: list[CounterpartyOut] = ()) -> PipelineResult:
+                 holder_names: list[str] = (), existing_counterparties: list[CounterpartyOut] = (),
+                 merchant_rules: dict[str, str] | None = None) -> PipelineResult:
     acc = {a.account_id: a for a in accounts}
     holders = frozenset(clean(h) for h in holder_names)
     items = []
@@ -101,22 +101,24 @@ def run_pipeline(user_id: str, raws: list[PRaw], accounts: list[PAccount], categ
                           person_keys=res.person_keys))
 
     txns, merged = dedupe(items)
+    cps = _assign_pseudonyms(txns, list(existing_counterparties))  # before rules: user rules may target contacts
     inferred = _infer_card_accounts(user_id, txns, accounts)
     match_transfers(txns, user_id, accounts + inferred)
 
-    need_ml = [t for t in txns if not categorise_by_rules(t)]
+    need_ml = [t for t in txns if not categorise_by_rules(t, merchant_rules)]
     if need_ml:
+        threshold = load_yaml("categories")["ml_min_confidence"]
         if categoriser is None:
             for t in need_ml:
-                t.category, t.category_source, t.category_confidence = "other", "rule", 0.0
+                t.category, t.category_source, t.category_confidence = "uncategorised", "ml", 0.0
         else:
             labels, confs = categoriser.predict([t.payee_clean for t in need_ml], [t.amount for t in need_ml],
                                                 [t.channel if t.channel in CHANNELS else "other" for t in need_ml])
             for t, lab, conf in zip(need_ml, labels, confs, strict=True):
-                t.category = lab if conf >= ML_MIN_CONFIDENCE else "other"
+                # D21: below the threshold we say "uncategorised" rather than guess confidently
+                t.category = lab if conf >= threshold else "uncategorised"
                 t.category_source, t.category_confidence = "ml", conf
 
-    cps = _assign_pseudonyms(txns, list(existing_counterparties))
     for t in txns:
         t.txn_id = stable_id("txn", user_id, t.raw.raw_id)
     txns.sort(key=lambda t: t.raw.sort_key())

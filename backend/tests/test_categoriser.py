@@ -11,6 +11,17 @@ def test_categoriser_holdout_report_and_determinism(categoriser):
     assert labels == ["health", "fuel", "dining", "groceries"]
 
 
+def test_report_quotes_only_the_unseen_type_holdout(tmp_path, categoriser):
+    from app.core.config import load_yaml
+    from app.pipeline.categorise.train import write_report
+
+    out = tmp_path / "r.md"
+    write_report(categoriser.metrics, out, load_yaml("categories")["ml_min_confidence"])
+    text = out.read_text()
+    easy = f"{categoriser.metrics['unseen_merchants']['accuracy']:.0%}"
+    assert easy not in text and "(configured)" in text
+
+
 def test_training_is_deterministic():
     a, ma = train_and_evaluate(per_merchant=1)
     b, mb = train_and_evaluate(per_merchant=1)

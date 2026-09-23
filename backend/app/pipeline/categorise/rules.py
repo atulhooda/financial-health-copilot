@@ -16,13 +16,20 @@ def _any(text: str, words: list[str]) -> bool:
     return any(w.upper() in text for w in words)
 
 
-def categorise_by_rules(t: PTxn) -> bool:
-    """Assign a rule category in place. Returns False if the ML fallback is needed."""
+def categorise_by_rules(t: PTxn, merchant_rules: dict[str, str] | None = None) -> bool:
+    """Assign a rule category in place. Returns False if the ML fallback is needed.
+
+    Order: transfers (already set) > manual category > user merchant rule > loan legs > keywords >
+    merchant map > P2P remarks > mandate entity > credit default.
+    """
     cats, merchants = _cfg()
     if t.category is not None:  # set by transfer matching
         return True
     if t.raw.category_hint and t.raw.category_hint in cats["categories"]:
         t.category, t.category_source, t.category_confidence = t.raw.category_hint, "user", 1.0
+        return True
+    if merchant_rules and t.merchant_key in merchant_rules:
+        t.category, t.category_source, t.category_confidence = merchant_rules[t.merchant_key], "user", 1.0
         return True
 
     def set_(cat: str, conf: float = 1.0) -> bool:

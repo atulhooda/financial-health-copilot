@@ -45,7 +45,7 @@ class Account(Base):
     masked_number: Mapped[str] = mapped_column(String(32))  # e.g. XX4321, never full
     last4: Mapped[str] = mapped_column(String(4))
     role: Mapped[str | None] = mapped_column(String(16))  # operating | reserve | liability
-    link_status: Mapped[str] = mapped_column(String(16))  # linked | known_unlinked
+    link_status: Mapped[str] = mapped_column(String(16))  # linked | sms_only | known_unlinked (D19)
     known_via: Mapped[str] = mapped_column(String(16))  # aa | statement | sms | manual | inferred
     credit_limit_paise: Mapped[int | None] = mapped_column(BigInteger)
     min_balance_paise: Mapped[int | None] = mapped_column(BigInteger)
@@ -95,6 +95,30 @@ class RawTransactionRow(Base):
     category_hint: Mapped[str | None] = mapped_column(String(32))  # manual entries only
     payload_hash: Mapped[str] = mapped_column(String(64))
     received_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    ingest_seq: Mapped[int] = mapped_column(Integer, default=0)  # per-user ingest watermark (D22/D24)
+
+
+class AccountState(Base):
+    """Append-only account metadata as reported by a source at a date: the point-in-time truth (D22)."""
+
+    __tablename__ = "account_states"
+    user_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    ingest_seq: Mapped[int] = mapped_column(Integer, primary_key=True)
+    as_of_date: Mapped[dt.date] = mapped_column(Date)
+    received_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    source: Mapped[str] = mapped_column(String(16))  # aa | statement
+    fields: Mapped[dict] = mapped_column(JSONType)
+
+
+class MerchantRule(Base):
+    """A user's category correction for a merchant; applies to past and future transactions (D21)."""
+
+    __tablename__ = "merchant_rules"
+    user_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    merchant_key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    category: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Transaction(Base):
@@ -210,7 +234,8 @@ class GlobalCounter(Base):
 
 
 USER_SCOPED_MODELS = [
-    User, Consent, Account, Balance, RawTransactionRow, Transaction, TransactionSource, Counterparty,
+    User, Consent, Account, Balance, RawTransactionRow, AccountState, MerchantRule, Transaction, TransactionSource,
+    Counterparty,
     RecurringItem, Snapshot, SnapshotDiff, AskLog, ValidatorBlock,
 ]
 
