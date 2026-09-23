@@ -1,0 +1,84 @@
+# Canonical merchants. aliases: upper-case substrings seen in narrations / VPAs / SMS payees.
+# category: for debits.  credit_category: for credits (e.g. a gig platform payout).
+# Matching is longest-alias-first so "SWIGGY INSTAMART" beats "SWIGGY".
+merchants:
+  swiggy:          {name: Swiggy, category: food_delivery, aliases: [SWIGGY, BUNDL TECHNOLOGIES]}
+  swiggy_instamart: {name: Swiggy Instamart, category: groceries, aliases: [SWIGGY INSTAMART, INSTAMART]}
+  swiggy_partner:  {name: Swiggy (partner payouts), category: other, credit_category: income_gig, aliases: [BUNDL TECH PAYOUT, SWIGGY PARTNER PAYOUT]}
+  zomato:          {name: Zomato, category: food_delivery, aliases: [ZOMATO]}
+  blinkit:         {name: Blinkit, category: groceries, aliases: [BLINKIT, GROFERS]}
+  zepto:           {name: Zepto, category: groceries, aliases: [ZEPTO, KIRANAKART]}
+  bigbasket:       {name: BigBasket, category: groceries, aliases: [BIGBASKET, BIG BASKET, SUPERMARKET GROCERY SUPPLIES]}
+  dmart:           {name: DMart, category: groceries, aliases: [DMART, AVENUE SUPERMARTS]}
+  amazon:          {name: Amazon, category: shopping, aliases: [AMAZON, AMZN, AMAZON PAY]}
+  amazon_prime:    {name: Prime Video, category: ott_subscription, subscription_group: ott_video, aliases: [AMAZON PRIME, PRIMEVIDEO, AMAZONPRIME, PRIME VIDEO]}
+  croma:           {name: Croma, category: shopping, aliases: [CROMA, INFINITI RETAIL]}
+  decathlon:       {name: Decathlon, category: shopping, aliases: [DECATHLON]}
+  flipkart:        {name: Flipkart, category: shopping, aliases: [FLIPKART]}
+  myntra:          {name: Myntra, category: shopping, aliases: [MYNTRA]}
+  ajio:            {name: Ajio, category: shopping, aliases: [AJIO, RELIANCE RETAIL AJIO]}
+  netflix:         {name: Netflix, category: ott_subscription, subscription_group: ott_video, aliases: [NETFLIX]}
+  jiohotstar:      {name: JioHotstar, category: ott_subscription, subscription_group: ott_video, aliases: [JIOHOTSTAR, HOTSTAR, DISNEY HOTSTAR, NOVI DIGITAL]}
+  sonyliv:         {name: SonyLIV, category: ott_subscription, subscription_group: ott_video, aliases: [SONYLIV, SONY LIV]}
+  zee5:            {name: ZEE5, category: ott_subscription, subscription_group: ott_video, aliases: [ZEE5]}
+  spotify:         {name: Spotify, category: ott_subscription, subscription_group: music, aliases: [SPOTIFY]}
+  youtube_premium: {name: YouTube Premium, category: ott_subscription, subscription_group: music, aliases: [YOUTUBE PREMIUM, GOOGLE YOUTUBE]}
+  uber:            {name: Uber, category: transport, aliases: [UBER]}
+  uber_partner:    {name: Uber (driver payouts), category: other, credit_category: income_gig, aliases: [UBER INDIA SYSTEMS PAYOUT, UBER DRIVER PAYOUT]}
+  ola:             {name: Ola, category: transport, aliases: [OLA, ANI TECHNOLOGIES, OLACABS]}
+  rapido:          {name: Rapido, category: transport, aliases: [RAPIDO, ROPPEN]}
+  rapido_partner:  {name: Rapido (captain payouts), category: other, credit_category: income_gig, aliases: [ROPPEN TRANSPORTATION PAYOUT, RAPIDO CAPTAIN PAYOUT]}
+  pune_metro:      {name: Pune Metro, category: transport, aliases: [PUNE METRO, MAHA METRO]}
+  delhi_metro:     {name: Delhi Metro, category: transport, aliases: [DMRC, DELHI METRO]}
+  irctc:           {name: IRCTC, category: travel, aliases: [IRCTC]}
+  makemytrip:      {name: MakeMyTrip, category: travel, aliases: [MAKEMYTRIP, MMT]}
+  indigo:          {name: IndiGo, category: travel, aliases: [INDIGO, INTERGLOBE AVIATION]}
+  hp_petrol:       {name: HP Petrol, category: fuel, aliases: [HPCL, HP PETROL, HINDUSTAN PETROLEUM]}
+  iocl:            {name: Indian Oil, category: fuel, aliases: [IOCL, INDIAN OIL]}
+  bpcl:            {name: Bharat Petroleum, category: fuel, aliases: [BPCL, BHARAT PETROLEUM]}
+  msedcl:          {name: MSEDCL, category: utilities, aliases: [MSEDCL, MAHADISCOM, MAHAVITARAN]}
+  bses:            {name: BSES, category: utilities, aliases: [BSES]}
+  bescom:          {name: BESCOM, category: utilities, aliases: [BESCOM]}
+  indane:          {name: Indane Gas, category: utilities, aliases: [INDANE]}
+  airtel:          {name: Airtel, category: telecom, aliases: [AIRTEL, BHARTI AIRTEL]}
+  jio:             {name: Jio, category: telecom, aliases: [RELIANCE JIO, JIO PREPAID, JIOFIBER, MYJIO]}
+  vi:              {name: Vi, category: telecom, aliases: [VODAFONE IDEA, VI PREPAID]}
+  act_fibernet:    {name: ACT Fibernet, category: telecom, aliases: [ACT FIBERNET, ATRIA CONVERGENCE]}
+  apollo_pharmacy: {name: Apollo Pharmacy, category: health, aliases: [APOLLO PHARMACY, APOLLO]}
+  pharmeasy:       {name: PharmEasy, category: health, aliases: [PHARMEASY]}
+  lic:             {name: LIC, category: insurance, aliases: [LIC OF INDIA, LIFE INSURANCE CORPORATION, LICI]}
+  hdfc_ergo:       {name: HDFC Ergo, category: insurance, aliases: [HDFC ERGO]}
+  bookmyshow:      {name: BookMyShow, category: entertainment, aliases: [BOOKMYSHOW, BIGTREE]}
+  pvr:             {name: PVR INOX, category: entertainment, aliases: [PVR, INOX]}
+  starbucks:       {name: Starbucks, category: dining, aliases: [STARBUCKS, TATA STARBUCKS]}
+  dominos:         {name: Domino's, category: dining, aliases: [DOMINOS, JUBILANT FOODWORKS]}
+  mcdonalds:       {name: McDonald's, category: dining, aliases: [MCDONALDS, HARDCASTLE RESTAURANTS]}
+  cred:            {name: CRED, category: other, aliases: [CRED CLUB, DREAMPLUG]}
+  # Lenders (NACH EMIs) and AMCs (SIPs)
+  bajaj_finance:   {name: Bajaj Finance, category: emi, aliases: [BAJAJ FINANCE, BAJAJ FIN, BAJAJFIN, BAJAJ FINSERV]}
+  tata_capital:    {name: Tata Capital, category: emi, aliases: [TATA CAPITAL, TATACAP]}
+  sbi_home_loan:   {name: SBI Home Loan, category: emi, aliases: [SBI HOME LOAN, SBI HL EMI]}
+  hdfc_car_loan:   {name: HDFC Car Loan, category: emi, aliases: [HDFC AUTO LOAN, HDFC CAR LOAN]}
+  icici_pru_mf:    {name: ICICI Prudential MF, category: sip_investment, aliases: [ICICIPRUMF, ICICI PRUDENTIAL MF, ICICI PRU MF]}
+  axis_mf:         {name: Axis MF, category: sip_investment, aliases: [AXISMF, AXIS MUTUAL FUND]}
+  hdfc_mf:         {name: HDFC MF, category: sip_investment, aliases: [HDFCMF, HDFC MUTUAL FUND]}
+  bse_star_mf:     {name: BSE StAR MF, category: sip_investment, aliases: [BSE LIMITED, BSE STAR MF, BSESTARMF]}
+  # Employers (credits carry SALARY keyword; category comes from keyword rule)
+  acme_tech:       {name: Acme Technologies, category: other, credit_category: income_salary, aliases: [ACME TECHNOLOGIES]}
+  globex:          {name: Globex India, category: other, credit_category: income_salary, aliases: [GLOBEX INDIA]}
+  initech:         {name: Initech Services, category: other, credit_category: income_salary, aliases: [INITECH SERVICES]}
+  delhi_public_school: {name: Delhi Public School, category: education, aliases: [DELHI PUBLIC SCHOOL, DPS]}
+
+# Words that mark a payee as a business, not a person (SPEC §5 person detection).
+business_words: [STORE, STORES, KIRANA, MEDICAL, MEDICOS, PHARMACY, PHARMA, CHEMIST, CLINIC, HOSPITAL, DIAGNOSTICS,
+  ENTERPRISES, ENTERPRISE, TRADERS, TRADING, CAFE, RESTAURANT, HOTEL, DHABA, BAKERY, SWEETS, MART, SUPERMARKET, FUELS,
+  PETROL, PETROLEUM, SERVICE, SERVICES, STATION, AGENCY, AGENCIES, CENTRE, CENTER, PVT, LTD, LIMITED, LLP, INDIA,
+  TECHNOLOGIES, SOLUTIONS, SYSTEMS, TRAVELS, TOURS, CABS, GARMENTS, FASHION, FOOTWEAR, ELECTRONICS, MOBILE, MOBILES,
+  COLLECTION, TEXTILES, ACADEMY, CLASSES, COACHING, SCHOOL, INSTITUTE, INSURANCE, CINEMAS, MULTIPLEX, SALON, PARLOUR,
+  GENERAL, PROVISION, DAIRY, VEGETABLES, FRUITS, BHANDAR, CORPORATION, FOODS, KITCHEN, HOUSE, POINT, PLAZA, MALL,
+  STUDIO, GYM, FITNESS, LAB, LABS, OPTICALS, JEWELLERS, HARDWARE, PAINTS, SNACKS, BHOJANALAYA, BIRYANI, TEA, CHAI,
+  BROADBAND, TELECOM, POWER, GAS, WATER, ELECTRICITY, FILLING, AUTO, MOTORS, GARAGE, WORKS, SHOP, BAZAAR, STALL]
+
+# Noise tokens stripped from payee strings before matching / slugging.
+noise_words: [PVT, LTD, LIMITED, PRIVATE, INDIA, ONLINE, PAYMENTS, PAYMENT, UPI, PAY, IN, THE, AND, CO, COM, WWW,
+  PUNE, MUMBAI, BENGALURU, BANGALORE, DELHI, NEW, GURUGRAM, NOIDA, HYDERABAD, CHENNAI, KOLKATA, NASHIK]

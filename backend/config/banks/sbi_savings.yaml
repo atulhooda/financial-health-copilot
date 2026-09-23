@@ -1,0 +1,12 @@
+institution: sbi
+account_kind: savings
+delimiter: ","
+skip_rows: 0
+date_format: "%d %b %Y"
+columns:
+  date: Txn Date
+  narration: Description
+  reference: Ref No./Cheque No.
+  debit: Debit
+  credit: Credit
+  balance: Balance
