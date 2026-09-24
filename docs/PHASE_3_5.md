@@ -54,3 +54,51 @@ If any criterion fails: revert the model, keep the unconditional bootstrap, and 
 
 ---
 *Freeze line. Everything below was added after the evaluation run.*
+
+## Result: **FAIL**, so the model was reverted (evaluated once, 2026-09-24)
+Criterion 4 held (no changes under `backend/app/demo/`). Criteria 1–3, per row:
+
+| Row | Coverage base → new | Coverage criterion | Calibration gap base → new | Gap criterion | Mean predicted dip base → new | Dip now base → new |
+|---|---|---|---|---|---|---|
+| A t0 | 0.6542 → 0.8629 | PASS | 0.0807 → 0.2130 | FAIL | 0.65 → 0.78 (observed 0.57) | 1.000 → 1.000 |
+| A 1 | 0.6542 → 0.8629 | PASS | 0.0807 → 0.2130 | FAIL | 0.65 → 0.78 (observed 0.57) | 1.000 → 1.000 |
+| A 2 | 0.6660 → 0.8151 | PASS | 0.0956 → 0.1966 | FAIL | 0.64 → 0.74 (observed 0.55) | 0.998 → 0.997 |
+| A 3 | 0.6620 → 0.8111 | PASS | 0.0956 → 0.1966 | FAIL | 0.64 → 0.74 (observed 0.55) | 0.998 → 0.997 |
+| B T0 | 0.6991 → 0.6426 | FAIL | 0.3493 → 0.4734 | FAIL | 0.35 → 0.47 (observed 0.00) | 0.190 → 0.189 |
+| C T0 | 0.7937 → 0.7203 | FAIL | 0.0000 → 0.0000 | PASS | 0.00 → 0.00 (observed 0.00) | 0.000 → 0.000 |
+
+**Decision:** as pre-committed, the balance-aware model was reverted. `engines/forecast.py` is back to this freeze
+commit's version (byte-identical) and the unconditional bootstrap stays. No parameter was tuned after the run.
+
+### What happened
+- **A:** bands got wider (coverage 65–67% → 81–86%), but dip predictions got *more* pessimistic (mean predicted
+  65% → 78% against 57% observed). The headline dip stayed at ~100%, so the saturation was not caused by the spend
+  model alone.
+- **B:** coverage fell 5.7 points and over-warning grew (35% → 47% predicted, 0% observed).
+- **C:** coverage fell 7.3 points. The SBI account's large spare balance put it in the top bucket, whose rare big days
+  turned a −₹881/month spend error into +₹7,829/month.
+
+### Likely cause (a hypothesis only, not tested here)
+The frozen definition, *spare = balance − scheduled debits due in the next 14 days*, ignores **scheduled credits** in
+the same window. On the ~10 days before payday, next month's rent, EMI and card payment fall inside the lookahead
+but the salary doesn't. So late-cycle days look deeply "short" even for users who are fine, and the low bucket mixes
+genuinely broke days with pre-payday days. A variant that nets scheduled credits (spare until the next income) is
+the obvious next candidate. It needs its **own** pre-registered evaluation; trying it now would be tuning on the
+results above.
+
+### Limitations we keep (documented, not hidden)
+1. **A's headline dip probability stays near 100%.** At T0, A opens at ₹5,209 against a ₹5,000 floor with 11 days
+   to payday, so almost any normal day breaches it. That is a real, near-certain event, not a model artefact. Phase 4
+   leads with **bounce risk**, which does move (8% → 13% → 30% across T0, +2, +3), and emits **no dip-based reason
+   codes** (`DIP_RISK_UP`/`DIP_RISK_DOWN` are withheld) because the dip metric is saturated.
+2. **Balance-dependent spenders (A) get bands that miss 1 day in 3** (coverage 65–67% vs 80% target). Confidence says
+   so: Medium, "band held on 65% of past days, target 80%".
+3. **B's over-warning is mostly income-side** (see `docs/FORECAST.md`): payouts are under-predicted by ~38% against
+   ~31% on spend. An unrepresentative three-week payout drought at the start of B's history sits in every bootstrap
+   pool.
+
+### Separate bug fix made after the revert (not part of this evaluation)
+Diagnosing C's +17% income error found that **"last working day of the month" salaries** (C: 31, 30, 29, 30, 31) were
+anchored to a fixed day (29), so a salary was predicted inside windows where it really landed just outside. Month-end
+anchoring (D23) fixed it: C's coverage went 79.4% → 84.3%, and A and B were unchanged. `docs/FORECAST.md` has the
+current numbers.

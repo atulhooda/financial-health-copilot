@@ -113,3 +113,15 @@ def test_two_identical_obligations_are_enough_for_short_histories():
     shop = [{"date": d, "amount": 999_00, "category": "shopping", "merchant_key": "decathlon"}
             for d in (dt.date(2026, 4, 5), dt.date(2026, 5, 5))]
     assert not detect_recurring(make_view(shop, dt.date(2026, 6, 4)))  # discretionary kinds need 3
+
+
+def test_last_working_day_salary():
+    """Found by untuned persona C: 'last working day of the month' is not a fixed day-of-month anchor."""
+    days = [dt.date(2026, 3, 31), dt.date(2026, 4, 30), dt.date(2026, 5, 29), dt.date(2026, 6, 30), dt.date(2026, 7, 31)]
+    rows = [{"date": d, "amount": 140000_00, "direction": "credit", "category": "income_salary",
+             "merchant_key": "globex"} for d in days]
+    s = _only(detect_recurring(make_view(rows, dt.date(2026, 8, 13))), "globex")
+    assert s.anchor == "month_end" and s.next_due == dt.date(2026, 8, 31)  # Monday
+    from app.engines.schedule import _occurrences
+    assert _occurrences(s, dt.date(2026, 8, 14), dt.date(2026, 11, 30)) == [
+        dt.date(2026, 8, 31), dt.date(2026, 9, 30), dt.date(2026, 10, 30), dt.date(2026, 11, 30)]  # Oct 31 is a Sat

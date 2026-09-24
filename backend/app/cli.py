@@ -183,14 +183,44 @@ def _write_forecast_report(rows, path) -> None:
         "10th–90th percentile band, over rolling origins every 15 days (horizon up to 45 days). A well-calibrated",
         "band covers about 80%. This is the number behind confidence and the one we quote.",
         "",
-        "| Persona | Point | Origins | Days | P10–P90 coverage | Dip Brier | Mean predicted dip | Observed dip rate |"
-        " Confidence |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| Persona | Point | Origins | Days | P10–P90 coverage | Confidence |",
+        "|---|---|---|---|---|---|",
     ]
     for user, label, as_of, _fc, conf, bt in rows:
+        lines.append(f"| {user} | {label} ({as_of}) | {len(bt.origins)} | {bt.days} | **{pct(bt.coverage)}** |"
+                     f" {conf.label}: {conf.reason} |")
+    lines += [
+        "",
+        "## Dip calibration",
+        "",
+        "For each backtest origin whose outcome is known: the predicted probability of dipping below the floor before",
+        "the next income, and whether the balance actually breached it. **Calibration gap** = |mean predicted − observed",
+        "breach frequency|; 0 is perfect. Brier is the mean squared error of the individual predictions.",
+        "",
+        "| Persona | Point | Outcomes | Mean predicted dip | Observed breach frequency | Calibration gap | Brier |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for user, label, _as_of, _fc, _conf, bt in rows:
+        gap = "n/a" if bt.calibration_gap is None else f"{bt.calibration_gap * 100:.1f} pts"
         brier = "n/a" if bt.brier is None else f"{bt.brier:.2f}"
-        lines.append(f"| {user} | {label} ({as_of}) | {len(bt.origins)} | {bt.days} | **{pct(bt.coverage)}** | {brier} |"
-                     f" {pct(bt.mean_predicted_dip)} | {pct(bt.observed_dip_rate)} | {conf.label} |")
+        lines.append(f"| {user} | {label} | {len(bt.dip_pairs)} | {pct(bt.mean_predicted_dip)} | "
+                     f"{pct(bt.observed_dip_rate)} | **{gap}** | {brier} |")
+    lines += [
+        "",
+        "## Where the error comes from: income side vs spend side",
+        "",
+        "Over the same backtest days, the forecast's mean predicted money in and money out of the operating account",
+        "vs what actually happened (predicted − actual, ₹ per 30 days). Net < 0 means the forecast was too pessimistic.",
+        "",
+        "| Persona | Point | Income side | Spend side | Net |",
+        "|---|---|---|---|---|",
+    ]
+    for user, label, _as_of, _fc, _conf, bt in rows:
+        e = bt.side_errors()
+        rel = lambda x: "" if x is None else f" ({x:+.0%})"  # noqa: E731
+        lines.append(f"| {user} | {label} | {e['income_error_per_30d'] / 100:+,.0f}{rel(e['income_error_rel'])} | "
+                     f"{e['spend_error_per_30d'] / 100:+,.0f}{rel(e['spend_error_rel'])} | "
+                     f"{e['net_error_per_30d'] / 100:+,.0f} |")
     lines += [
         "",
         "## Reading this",
@@ -199,12 +229,19 @@ def _write_forecast_report(rows, path) -> None:
         "  samples discretionary days independently of the balance, so after payday it under-predicts spending,",
         "  and late in the cycle it over-predicts it. The coverage shortfall against 80% is the measured cost of that",
         "  (D27). We did not retune the generator to hide it.",
-        "- **Persona B** (gig income) has payouts inside the bootstrap. Its dip calibration shows whether we",
-        "  over- or under-warn a user whose income is irregular.",
+        "- **Persona B** (gig income) over-warns: it predicts dips at about a third of origins, and none happened.",
+        "  The split shows why. **The income side dominates:** predicted payouts run ~38% below actual, against",
+        "  ~31% on the spend side, so net cash is under-predicted. B's history opens with a three-week payout drought",
+        "  (random in the generated world, left untuned). The bootstrap treats those weeks as typical, and they sit in",
+        "  every pool of up to 180 days. Spend is under-predicted too, because B spent little while broke. The fix",
+        "  worth testing next is on the income side (e.g. down-weight days before the first payout, or model payouts",
+        "  as their own weekly process). The spend model is not the main cause.",
         "- **Persona C** has most of its operating-account flows scheduled (salary, EMIs, fees, card paid in full),",
         "  so its band is narrow. Coverage tests whether the amount spreads on estimated items are honest.",
         "- Confidence label: High at coverage >= 75%, Medium 60-75%, Low below 60%; history under six months or an",
         "  unlinked account can only cap it. The % shown anywhere is the measured coverage itself (SPEC §6.4).",
+        "- Phase 3.5 tested a balance-aware spend model against pre-registered criteria. It failed, and was",
+        "  reverted: see `docs/PHASE_3_5.md`.",
         "",
     ]
     path.write_text("\n".join(lines), encoding="utf-8")

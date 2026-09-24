@@ -1,6 +1,7 @@
 """Recurring detection (SPEC §6.2, D5a, D23). Pure: View -> list[RecurringItem]."""
 from __future__ import annotations
 
+import calendar
 import datetime as dt
 import statistics
 from collections import Counter
@@ -49,6 +50,7 @@ class RecurringItem:
     subscription_group: str | None = None
     account_id: str | None = None
     counter_account_id: str | None = None  # sweeps: the own account receiving the money
+    anchor: str | None = None  # "month_end" = last (working) day of the month; else a fixed day-of-month
     amounts: list[int] = field(default_factory=list)  # observed amounts, for the forecast's amount spread
 
     @property
@@ -99,6 +101,17 @@ def amount_level(amounts: list[int], variable_ok: bool = False) -> dict | None:
     return None
 
 
+def is_month_end(dates: list[dt.date]) -> bool:
+    """Paid on the last (working) day of the month: every date within 3 days of month end, days not all equal."""
+    return (len({d.day for d in dates}) > 1
+            and all(calendar.monthrange(d.year, d.month)[1] - d.day <= 3 for d in dates))
+
+
+def month_end(d: dt.date, kind: str) -> dt.date:
+    end = dt.date(d.year, d.month, calendar.monthrange(d.year, d.month)[1])
+    return roll_back_weekend(end) if kind == "salary" else end
+
+
 def _anchor_day(dates: list[dt.date]) -> int:
     counts = Counter(d.day for d in dates)
     top = max(counts.values())
@@ -107,6 +120,8 @@ def _anchor_day(dates: list[dt.date]) -> int:
 
 def next_due(cadence: str, dates: list[dt.date], kind: str) -> dt.date:
     last = dates[-1]
+    if cadence == "monthly" and is_month_end(dates):
+        return month_end(add_months(last + dt.timedelta(days=10), 0, 1), kind)
     if cadence == "monthly":
         anchor = _anchor_day(dates)
         d = add_months(last + dt.timedelta(days=10), 0, anchor)
@@ -154,7 +169,7 @@ def detect_recurring(view: View) -> list[RecurringItem]:
                 subscription_group=group, account_id=Counter(g["account_id"].to_list()).most_common(1)[0][0],
                 counter_account_id=Counter([c for c in g["counter_account_id"].to_list() if c]).most_common(1)[0][0]
                 if kind == "sweep" and any(g["counter_account_id"].to_list()) else None,
-                amounts=amounts)
+                amounts=amounts, anchor="month_end" if cadence == "monthly" and is_month_end(dates) else None)
             items.append(item)
             continue
         # Annual plans: a single charge that matches a known annual price (D23)

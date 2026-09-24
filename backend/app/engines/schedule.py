@@ -20,7 +20,7 @@ import polars as pl
 from app.core.dates import add_months, roll_back_weekend
 from app.core.ids import stable_id
 from app.engines.financial import _balance_on, _due_after, _last_day_on_or_before
-from app.engines.recurring import MANDATE_KINDS, RecurringItem, _anchor_day
+from app.engines.recurring import MANDATE_KINDS, RecurringItem, _anchor_day, month_end
 from app.engines.view import View
 
 DEBIT_ORDER = {"sweep": 0, "emi": 1, "sip": 2, "rent": 3, "card_payment": 4, "fees": 5, "bill": 6,
@@ -74,6 +74,8 @@ def _step(item: RecurringItem, anchor: int, k: int) -> dt.date:
     if item.cadence == "weekly":
         return item.next_due + dt.timedelta(days=7 * k)
     months = {"monthly": 1, "quarterly": 3, "annual": 12}[item.cadence]
+    if item.anchor == "month_end":
+        return month_end(add_months(item.next_due, months * k, 1), item.kind)
     d = add_months(item.next_due, months * k, anchor if item.cadence == "monthly" else None)
     return roll_back_weekend(d) if item.kind == "salary" else d
 
