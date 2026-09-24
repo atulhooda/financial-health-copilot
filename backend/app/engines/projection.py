@@ -136,9 +136,11 @@ def project(inp: ProjectionInputs, mod: Modifier | None = None) -> Projection:
             surplus_used = extra_used - redirect_used
             if mod and mod.pay_in_full_once_clear and ra == 0:
                 full_mode = True
-        # routine differences free (or cost) cash: D26 applies to freed cash; explicit moves are separate
-        freed = (routine_b - routine_a) + (emi_b - emi_a) + (mod.consumption_cut if mod else 0)
+        # D26 applies to cash freed by a cut or a cheaper obligation. D35: a smaller card bill that follows
+        # mechanically from a smaller balance is NOT spending freed up; it stays as cash (spending held fixed).
+        freed = (emi_b - emi_a) + (mod.consumption_cut if mod else 0)
         delta = inp.liquid_trend_paise + (int(round(freed * (1 - s))) if freed > 0 else freed)
+        delta += routine_b - routine_a
         delta -= redirect_used + int(round(surplus_used * (1 - s)))
         consumption_delta = (mod.consumption_cut if mod else 0) + int(round(surplus_used * s))
         if mod and mod.sweep_to_savings_from_surplus:
@@ -158,15 +160,17 @@ def _score_at(inp: ProjectionInputs, last: Month) -> tuple[Score, Metrics]:
     card_interest_now = int(round((inp.revolving_paise or 0) * inp.card_rate_monthly))
     spend = inp.spend_paise - card_interest_now - inp.emi_paise + last.card_interest + last.emi - last.consumption_delta
     essential = max(1, inp.essential_paise - inp.emi_paise + last.emi)
-    util, revolving = m0.credit_utilisation, m0.revolving_paise
+    util, revolving, ratio = m0.credit_utilisation, m0.revolving_paise, m0.revolving_ratio
     if last.revolving is not None and inp.card_limit_paise:
         statement = last.revolving + int(round(last.revolving * inp.card_rate_monthly)) + inp.card_purchases_paise
         util, revolving = statement / inp.card_limit_paise, last.revolving
+        ratio = last.revolving / inp.card_limit_paise
     income = inp.income_paise
     m12 = dataclasses.replace(
         m0, spend_monthly_paise=spend, savings_rate=(income - spend) / income if income else None,
-        buffer_months=max(0, last.liquid) / essential, emi_monthly_paise=last.emi,
-        emi_to_income=last.emi / income if income else None, credit_utilisation=util, revolving_paise=revolving)
+        buffer_months=max(0, last.liquid - (last.revolving or 0)) / essential, emi_monthly_paise=last.emi,
+        emi_to_income=last.emi / income if income else None, credit_utilisation=util, revolving_paise=revolving,
+        revolving_ratio=ratio)
     return compute_score(m12), m12
 
 

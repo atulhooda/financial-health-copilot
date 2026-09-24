@@ -21,12 +21,14 @@ def _doc_table(title_regex: str) -> list[list[float]]:
 def test_doc_and_config_agree():
     cfg = load_yaml("scoring")["pillars"]
     for key, title in [("savings", r"\*\*P1 Savings rate\*\*"), ("buffer", r"\*\*P2 Emergency buffer"),
-                       ("debt", r"\*\*P3 EMI-to-income\*\*"), ("credit", r"Base score from overall utilisation:"),
+                       ("debt", r"\*\*P3 EMI-to-income\*\*"), ("credit", r"U, utilisation:"),
                        ("stability", r"\*\*P6 Spending stability\.\*\*")]:
         assert _doc_table(title) == [[float(x), float(y)] for x, y in cfg[key]["breakpoints"]], key
+    assert _doc_table(r"R, revolving \(carried past the due date\) as a share of the limit:") == [
+        [float(x), float(y)] for x, y in cfg["credit"]["revolving_breakpoints"]]
     weights = dict(re.findall(r"\| P\d \| ([^|]+?) \| (\d+) \|", DOC))
     assert {v["title"]: v["weight"] for v in cfg.values()} == {k: int(v) for k, v in weights.items()}
-    assert "min(base, 40)" in DOC and cfg["credit"]["revolving_cap"] == 40
+    assert "0.5 × U(utilisation) + 0.5 × R(revolving / limit)" in DOC and cfg["credit"]["utilisation_share"] == 0.5
     assert "25 × observed_bounce_charges" in DOC and cfg["liquidity"]["bounce_penalty"] == 25
 
 
@@ -34,7 +36,7 @@ def _metrics(**kw) -> Metrics:
     base = {f.name: None for f in dataclasses.fields(Metrics)}
     base.update(as_of=dt.date(2026, 9, 20), cycle_basis="salary", cycles=[], income_pattern="salaried",
                 income_monthly_paise=1, salary_level_paise=1, earmarked_loan_paise=0,
-                other_income_monthly_paise=0, spend_monthly_paise=0,
+                other_income_monthly_paise=0, spend_monthly_paise=0, revolving_ratio=None,
                 essential_monthly_paise=1, discretionary_monthly_paise=1, emi_monthly_paise=1,
                 debt_outstanding_paise=0, cards=[], recurring=[], debt_growth=None, overlaps=[], spend_by_category=[],
                 drift=[],
@@ -52,14 +54,18 @@ def test_scoring_worked_example():
     assert [p.key for p in s.pillars if p.status != "ok"] == ["credit"]
 
 
-def test_revolving_caps_credit_and_bounces_penalise_liquidity():
+def test_credit_pillar_is_continuous_and_bounces_penalise_liquidity():
     lows = [{"clean": True}] * 4
-    s = compute_score(_metrics(savings_rate=0.2, buffer_months=3, emi_to_income=0.1, credit_utilisation=0.05,
-                               revolving_paise=10_00, cycle_lows=lows, bounces=1, discretionary_ratio=1.0,
-                               cards=[object()]))
-    credit = next(p for p in s.pillars if p.key == "credit")
-    liq = next(p for p in s.pillars if p.key == "liquidity")
-    assert credit.score == 40 and liq.score == 75
+    def credit(ratio, util):
+        s = compute_score(_metrics(savings_rate=0.2, buffer_months=3, emi_to_income=0.1, credit_utilisation=util,
+                                   revolving_paise=1, revolving_ratio=ratio, cycle_lows=lows, bounces=1,
+                                   discretionary_ratio=1.0, cards=[object()]))
+        by_key = {p.key: p.score for p in s.pillars}
+        return by_key["credit"], by_key["liquidity"]
+    scores = [credit(r / 100, 0.05 + r / 100)[0] for r in range(0, 60)]
+    assert all(a >= b for a, b in zip(scores, scores[1:], strict=False))  # less revolving -> never lower
+    assert max(abs(a - b) for a, b in zip(scores, scores[1:], strict=False)) < 5  # no cliff anywhere
+    assert credit(0.0, 0.05)[0] == 100 and credit(0.0, 0.05)[1] == 75
 
 
 def test_interpolation_is_clamped_and_monotone():

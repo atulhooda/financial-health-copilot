@@ -64,7 +64,8 @@ All items are facts.
 All items are predictions, except floor, horizon and scheduled debit amounts/dates (facts). `floor` follows SPEC D17.
 
 ### GET `/v1/recommendations`
-`data`: `{ ranked: [action_key], combined_plan: { actions: [action_key], impact: Impact } }`
+`data`: `{ ranked: [action_key], combined_plan: { actions: [action_key], impact: Impact }, what_if_offers: [Recommendation /* rank null, explore-only, e.g. tenure extension, extra interest first (D37) */] }`.
+A Recommendation's `impact.kind` is `simulation` (Impact above) or `data` (D40: `{ accounts_linked_before, accounts_linked_after, accounts_known, unlocks: [..] }`). `pay_down_card` also carries `params.steps` (step 2: "Set card autopay to the full statement amount"), `extra.downside { pay_share, rebuild_to_paise, months_to_rebuild }` and `extra.post_clear_check` (D38). A `new_emi` what-if carries `impact.emi_dates { options: [{ option, first_due, new_emi_bounce_risk }], advice }` (D39).
 
 ### GET `/v1/timeline`
 `data`: `{ snapshots: [{ snapshot_id, seq, trigger, as_of, created_at, score, band, dip_probability, top_recs: [action_key] }], diffs: [{ from, to, reason_codes: [code], score_delta, band_change, pillar_deltas: [{key, delta}], rec_changes: [{ action_key, change: "added|removed|rank_changed", from_rank, to_rank, caused_by: [code] }] }] }`

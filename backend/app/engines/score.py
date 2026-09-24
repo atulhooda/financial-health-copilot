@@ -89,12 +89,14 @@ def compute_score(m: Metrics) -> Score:
         add("debt", v, 100.0 if m.emi_monthly_paise == 0 else interpolate(v, P["debt"]["breakpoints"]))
     else:
         add("debt", None, None, "no income observed")
-    # P4 credit health: needs a linked card (limit + statement); unlinked/SMS-only cards are excluded
+    # P4 credit health: needs a linked card (limit + statement); unlinked/SMS-only cards are excluded.
+    # Continuous in both utilisation and revolving/limit, so paying card debt down can only raise it.
     if m.credit_utilisation is not None:
         v = m.credit_utilisation * 100
-        s = interpolate(v, P["credit"]["breakpoints"])
-        if m.revolving_paise:
-            s = min(s, P["credit"]["revolving_cap"])
+        share = P["credit"]["utilisation_share"]
+        rev = (m.revolving_ratio or 0.0) * 100
+        s = share * interpolate(v, P["credit"]["breakpoints"]) + (1 - share) * interpolate(
+            rev, P["credit"]["revolving_breakpoints"])
         add("credit", v, s)
     else:
         add("credit", None, None, "card not linked" if m.cards else "no credit card")

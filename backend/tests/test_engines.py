@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from app.core.clock import FixedClock
 from app.db.repo import UserRepo
 from app.db.session import make_sessionmaker
-from app.demo.personas import T0, WORLD_END
+from app.demo.personas import BC_AS_OF, STEP2, T0
 from app.demo.scenario import persona_a_steps, seed_payloads
 from app.engines.attribution import attribute_change
 from app.engines.financial import compute_metrics
@@ -60,7 +60,7 @@ def _snapshot(v, m, s) -> tuple:
             dataclasses.asdict(bt))
 
 
-@pytest.mark.parametrize("late_clock", [WORLD_END, T0], ids=["received-later", "backfilled-early"])
+@pytest.mark.parametrize("late_clock", [STEP2, T0], ids=["received-later", "backfilled-early"])
 def test_t0_output_identical_whether_or_not_oct_nov_exist(tmp_path, categoriser, late_clock):
     def db(name):
         eng = create_engine(f"sqlite:///{tmp_path / name}")
@@ -113,10 +113,10 @@ def _replay_from(session, categoriser, i):
 
 def test_salary_hike_and_new_loan(session, categoriser):
     _replay(session, categoriser, 3)
-    _, m2, _ = _eval(session, categoriser, WORLD_END, max_ingest_seq=_seq_after_step(session, 2))
+    _, m2, _ = _eval(session, categoriser, STEP2, max_ingest_seq=_seq_after_step(session, 2))
     sal = next(r for r in m2.recurring if r.kind == "salary")
     assert sal.amount_paise == 103_040_00 and m2.income_monthly_paise >= 103_040_00
-    _, m3, _ = _eval(session, categoriser, WORLD_END)
+    _, m3, _ = _eval(session, categoriser, STEP2)
     new = next(r for r in m3.recurring if r.merchant_key == "tata_capital")
     assert new.source == "contract" and new.next_due == dt.date(2026, 12, 5)
     assert m3.emi_monthly_paise > m2.emi_monthly_paise
@@ -145,7 +145,7 @@ def test_linking_the_card_is_new_data_not_behaviour(session, categoriser):
 def test_new_loan_is_behaviour_not_a_reveal(session, categoriser):
     _replay(session, categoriser, 3)
     seq2, seq3 = _seq_after_step(session, 2), _seq_after_step(session, 3)
-    att = attribute_change(session, "demo-a", categoriser, WORLD_END, seq2, WORLD_END, seq3)
+    att = attribute_change(session, "demo-a", categoriser, STEP2, seq2, STEP2, seq3)
     assert att.revealed_accounts == []
     assert att.score["new_data"] == 0 and att.metrics["emi_to_income"]["restricted"] > att.metrics["emi_to_income"]["prev"]
 
@@ -168,7 +168,7 @@ def test_user_correction_becomes_a_merchant_rule(session, categoriser, clock):
 # ---- personas B and C ------------------------------------------------------------------------------
 def test_persona_b_irregular_income_is_not_forced_into_salary(session, categoriser, clock):
     _ingest(session, "demo-b", seed_payloads("demo-b"), clock, categoriser)
-    _, m, s = _eval(session, categoriser, T0, user="demo-b")
+    _, m, s = _eval(session, categoriser, BC_AS_OF, user="demo-b")
     assert m.income_pattern == "irregular" and m.cycle_basis == "calendar"
     assert not [r for r in m.recurring if r.direction == "credit" and r.kind in ("salary", "income")]
     assert m.income_monthly_paise > 0 and next(p for p in s.pillars if p.key == "credit").reason == "no credit card"
@@ -176,7 +176,7 @@ def test_persona_b_irregular_income_is_not_forced_into_salary(session, categoris
 
 def test_persona_c_annual_subscription_and_two_salaries(session, categoriser, clock):
     _ingest(session, "demo-c", seed_payloads("demo-c"), clock, categoriser)
-    _, m, _ = _eval(session, categoriser, T0, user="demo-c")
+    _, m, _ = _eval(session, categoriser, BC_AS_OF, user="demo-c")
     prime = next(r for r in m.recurring if r.merchant_key == "amazon_prime")
     assert prime.cadence == "annual"
     assert {o["group"] for o in m.overlaps} == {"ott_video"}

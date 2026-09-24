@@ -102,3 +102,6 @@ Diagnosing C's +17% income error found that **"last working day of the month" sa
 anchored to a fixed day (29), so a salary was predicted inside windows where it really landed just outside. Month-end
 anchoring (D23) fixed it: C's coverage went 79.4% → 84.3%, and A and B were unchanged. `docs/FORECAST.md` has the
 current numbers.
+
+### Future work (logged after review, 2026-09-24)
+- **Salary-aware spare balance:** spare = balance + scheduled credits − scheduled debits until the next income. It is the obvious fix for the hypothesis above. It needs its own pre-registered criteria and a single evaluation, like this one. Deferred.

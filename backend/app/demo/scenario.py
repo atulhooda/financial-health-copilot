@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass
 
-from app.demo.personas import HISTORY_START, T0, WORLD_END, build
+from app.demo.personas import BC_AS_OF, HISTORY_START, STEP2, T0, build
 from app.demo.world import World
 from app.ingest.sms import reference_parse
 
@@ -37,25 +37,25 @@ def persona_a_steps(w: World | None = None) -> list[Step]:
               ("sms", phone_sms_payload(w, HISTORY_START, T0, hold))]),
         Step("1", T0, "Credit card linked via AA",
              [("aa", w.aa_payload(["card"], HISTORY_START, T0, hold))]),
-        Step("2", WORLD_END, "Two more months: salary hike seen in 2 credits",
-             [("aa", w.aa_payload(["sal", "sav", "loan1", "card"], nxt, WORLD_END, hold)),
-              ("sms", phone_sms_payload(w, nxt, WORLD_END, hold))]),
-        Step("3", WORLD_END, "New personal loan linked via AA (with EMI schedule) + disbursal credit",
-             [("aa", w.aa_payload(["loan2", "sal"], WORLD_END, WORLD_END))]),
+        Step("2", STEP2, "Two more months: salary hike seen in 2 credits",
+             [("aa", w.aa_payload(["sal", "sav", "loan1", "card"], nxt, STEP2, hold)),
+              ("sms", phone_sms_payload(w, nxt, STEP2, hold))]),
+        Step("3", STEP2, "New personal loan linked via AA (with EMI schedule) + disbursal credit",
+             [("aa", w.aa_payload(["loan2", "sal"], STEP2, STEP2))]),
     ]
 
 
 def seed_payloads(persona_id: str) -> list[tuple[str, dict]]:
-    """Full T0 history for personas B and C."""
+    """Full history for personas B and C (as of BC_AS_OF); persona A's T0 slice."""
     w = build(persona_id)
     if persona_id == "demo-b":
-        return [("aa", w.aa_payload(["sal"], HISTORY_START, T0)),
-                ("sms", phone_sms_payload(w, HISTORY_START, T0)),
+        return [("aa", w.aa_payload(["sal"], HISTORY_START, BC_AS_OF)),
+                ("sms", phone_sms_payload(w, HISTORY_START, BC_AS_OF)),
                 ("manual", {"transactions": w.meta["cash"]})]
     if persona_id == "demo-c":
-        return [("aa", w.aa_payload(["sal", "card", "home", "car"], HISTORY_START, T0)),
+        return [("aa", w.aa_payload(["sal", "card", "home", "car"], HISTORY_START, BC_AS_OF)),
                 ("statement", {"bank": "icici_savings", "account_masked": w.accounts["sal2"].masked,
-                               "content": w.csv_statement("sal2", "icici_savings", HISTORY_START, T0)})]
+                               "content": w.csv_statement("sal2", "icici_savings", HISTORY_START, BC_AS_OF)})]
     if persona_id == "demo-a":
         return persona_a_steps(w)[0].payloads
     raise KeyError(persona_id)

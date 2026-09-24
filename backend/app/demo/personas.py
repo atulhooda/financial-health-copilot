@@ -15,8 +15,12 @@ from app.demo.world import GAccount, World, sms_text
 from app.engines.emi import emi_paise
 
 HISTORY_START = dt.date(2026, 3, 21)
-T0 = dt.date(2026, 9, 20)
-WORLD_END = dt.date(2026, 11, 20)
+# Replay dates (pre-Phase-5 fix 6): every persona A step sits 2-3 days after A's payday, so the forecast is an
+# early warning with a month of runway, not a certainty 11 days out. Only replay dates moved.
+T0 = dt.date(2026, 9, 3)  # T0 and +1: two days after the Sep 1 payday
+STEP2 = dt.date(2026, 11, 2)  # +2 and +3: three days after the Oct 30 payday (the second hiked salary)
+BC_AS_OF = dt.date(2026, 9, 20)  # personas B and C are not replayed; their as-of date is unchanged
+WORLD_END = dt.date(2026, 11, 20)  # the generated world runs to here; replay slices stop at STEP2
 
 
 @dataclass
@@ -51,8 +55,9 @@ class PersonaA:
     sip: int = 5_000
     loan1: dict = field(default_factory=lambda: {"principal": 185_000, "rate_pct": 13.0, "tenure": 24,
                                                  "first_due": dt.date(2026, 1, 10)})
+    # The new loan is disbursed ON the +3 replay date (a replay-structure date, not behaviour): it moved with fix 6.
     loan2: dict = field(default_factory=lambda: {"principal": 200_000, "rate_pct": 14.0, "tenure": 24,
-                                                 "disbursed": dt.date(2026, 11, 20), "first_due": dt.date(2026, 12, 5)})
+                                                 "disbursed": STEP2, "first_due": dt.date(2026, 12, 5)})
     card_limit: int = 150_000
     card_opening_carry: int = 12_000
     card_monthly_rate: float = 0.035
@@ -327,7 +332,7 @@ def build_persona_b(p: PersonaB | None = None) -> World:
     w.meta["holder_names"] = [p.holder["name"], p.holder["nominee"]]
     w.meta["cash"] = []
     acc4 = w.accounts["sal"].last4
-    for day in daterange(HISTORY_START, T0):
+    for day in daterange(HISTORY_START, BC_AS_OF):
         if day.weekday() == 0 and rng.random() > p.missed_week_prob:  # Monday payouts
             for narr_key, entity, share in p.payout_platforms:
                 amt = _amount(rng, p.weekly_payout_median * share, p.payout_cv)
@@ -410,7 +415,7 @@ def build_persona_c(p: PersonaC | None = None) -> World:
     w.meta["loan_schedules"] = {"home": sh, "car": sc}
     w.meta["holder_names"] = [p.holder["name"], p.spouse["name"]]
     card_due: dict[dt.date, int] = {}
-    for day in daterange(HISTORY_START, T0):
+    for day in daterange(HISTORY_START, BC_AS_OF):
         last_working = roll_back_weekend(add_months(day, 1, 1) - dt.timedelta(days=1))
         if day == last_working:
             w.credit("sal", day, p.salary1 * 100, f"NEFT CR-HDFC0000240-GLOBEX INDIA PVT LTD-SALARY {day:%b%y}".upper())

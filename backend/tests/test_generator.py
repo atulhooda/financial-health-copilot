@@ -17,10 +17,11 @@ def test_generator_is_deterministic():
 
 def test_persona_a_story_inputs():
     w = build("demo-a")
-    aug_stmt = w.balance_at("card", dt.date(2026, 8, 18))
+    # at T0 (Sep 3) the last statement whose due date has passed is Jul 18 (due Aug 7)
+    jul_stmt = w.balance_at("card", dt.date(2026, 7, 18))
     paid = sum(t.amount for t in w.txns if t.account == "card" and t.direction == "credit"
-               and dt.date(2026, 8, 19) <= t.date <= T0)
-    assert 36_000_00 <= aug_stmt - paid <= 44_000_00  # revolving ~₹40k when the card is linked
+               and dt.date(2026, 7, 19) <= t.date <= dt.date(2026, 8, 7))
+    assert 36_000_00 <= jul_stmt - paid <= 44_000_00 and T0 == dt.date(2026, 9, 3)  # revolving ~₹40k at +1
     osts = {t.narration.split("/")[3] for t in w.txns if "AutoPay" in t.narration}
     assert osts == {"NETFLIX", "AMAZON PRIME", "JIOHOTSTAR"}
 

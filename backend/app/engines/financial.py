@@ -63,6 +63,7 @@ class Metrics:
     cards: list[CardMetrics]
     credit_utilisation: float | None
     revolving_paise: int | None
+    revolving_ratio: float | None  # revolving / total limit of linked cards (credit pillar, continuous)
     debt_growth: dict | None  # D31 alert (a FACT): revolving grew across statements while income rose or held
     recurring: list[RecurringItem]
     overlaps: list[dict]
@@ -248,8 +249,6 @@ def compute_metrics(view: View, recurring: list[RecurringItem] | None = None) ->
     # D29/D33: borrowed cash still sitting in the account is not a buffer (one shared earmark rule).
     earmarks = loan_earmarks(view)
     borrowed = sum(e.earmarked_paise for e in earmarks)
-    own_liquid = max(0, liquid - borrowed) if liquid is not None else None
-    buffer = own_liquid / essential_m if own_liquid is not None and essential_m > 0 else None
 
     # ---- debt ----
     emi_m = sum(r.monthly_paise for r in recurring if r.kind == "emi" and r.active and r.direction == "debit")
@@ -262,6 +261,12 @@ def compute_metrics(view: View, recurring: list[RecurringItem] | None = None) ->
                 is not None) / lim) if lim else None
     revs = [c.revolving_paise for c in cards if c.revolving_paise is not None]
     revolving = sum(revs) if revs else None
+    rev_limit = sum(c.limit_paise for c in cards if c.revolving_paise is not None and c.limit_paise)
+    revolving_ratio = revolving / rev_limit if revolving is not None and rev_limit else None
+    # Pre-Phase-5 fix 1: savings sitting against card debt of the same size are not a buffer. Only VISIBLE
+    # revolving is netted; an unlinked card's unknown balance isn't guessed (D30e, NEW_DATA_REVEALED cover it).
+    own_liquid = liquid - borrowed - (revolving or 0) if liquid is not None else None
+    buffer = max(0, own_liquid) / essential_m if own_liquid is not None and essential_m > 0 else None
 
     # ---- categories, drift ----
     last30 = tx.filter(pl.col("date") > view.as_of - dt.timedelta(days=30))
@@ -312,7 +317,8 @@ def compute_metrics(view: View, recurring: list[RecurringItem] | None = None) ->
         liquid_paise=liquid, earmarked_loan_paise=borrowed, buffer_months=buffer, emi_monthly_paise=emi_m,
         emi_to_income=emi_m / income if income > 0 else None, debt_outstanding_paise=debt,
         debt_to_income=debt / (12 * income) if income > 0 else None, cards=cards, credit_utilisation=util,
-        revolving_paise=revolving, debt_growth=_debt_growth(cards, salary_level or income, recurring),
+        revolving_paise=revolving, revolving_ratio=revolving_ratio,
+        debt_growth=_debt_growth(cards, salary_level or income, recurring),
         recurring=recurring, overlaps=overlapping_subscriptions(recurring),
         spend_by_category=by_cat, drift=drift, discretionary_ratio=disc_ratio, cycle_lows=lows, bounces=bounces,
         floor_paise=view.floor_paise, coverage=coverage, earmarks=earmarks)

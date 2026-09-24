@@ -11,34 +11,28 @@ hisaab ask --user demo-a "Kya main ₹60,000 ka phone 12 months ki EMI pe le sak
 ```
 **No WiFi:** `LLM_PROVIDER=none make demo`. **No Redis:** `EVENT_BUS=inprocess make demo`. Both paths are exercised in CI.
 
-## 2. Demo clock (SPEC D5)
-The demo never reads wall-clock time. All time comes from the injected `FixedClock`. Seed: `HISAAB_SEED=20260920`. Every step is a slice of **one** simulated world (SPEC §9), so balances are continuous.
+## 2. Demo clock (SPEC D5, D41)
+The demo never reads wall-clock time. All time comes from the injected `FixedClock`. Seed: `HISAAB_SEED=20260920`. Every step is a slice of **one** simulated world (SPEC §9), so balances are continuous. **Every step sits 2–3 days after A's payday** (pre-Phase-5 fix 6): our pitch is early warning, with a month of runway, not a certainty 11 days out.
 
 | Step | as_of | What is ingested | Via |
 |---|---|---|---|
-| **T0** | 2026-09-20 | 6 months (2026-03-21 → 09-20): salary a/c, savings a/c, existing loan (with its EMI schedule) via AA; ~15% of salary-account UPI debits also arrive via on-device-parsed SMS. Card **not linked**, and its bill payments are the only view of card spend. | aa, sms |
-| **+1** | 2026-09-20 | Credit card linked via AA (CREDIT_CARD: limit, APR, 6 months of transactions incl. interest and GST). The pipeline recomputes history: bill payments → `transfer_self`, itemised purchases count (D4). | aa |
-| **+2** | 2026-11-20 | Two more months of all linked accounts, with the Oct 1 and Nov 1 salary credits **hiked** (generator param: +12%). | aa, sms |
-| **+3** | 2026-11-20 (**no clock jump**) | A new personal loan appears as a **newly linked AA loan account with its EMI schedule** (first EMI 2026-12-05), plus the disbursal credit on 2026-11-20 in the salary account. It is known immediately through the contractual schedule (D5a). | aa |
+| **T0** | 2026-09-03 | ~5.5 months (2026-03-21 → 09-03): salary a/c, savings a/c, existing loan (with its EMI schedule) via AA; ~15% of salary-account UPI debits and all card spends arrive via on-device-parsed SMS. The card is visible (SMS) but not linked. | aa, sms |
+| **+1** | 2026-09-03 | Credit card linked via AA (CREDIT_CARD: limit, APR, statements incl. interest and GST). | aa |
+| **+2** | 2026-11-02 | Two more months of all linked accounts, with the Oct 1 and Oct 30 salary credits **hiked** (+12%). | aa, sms |
+| **+3** | 2026-11-02 (**no clock jump**) | A new personal loan appears as a **newly linked AA loan account with its EMI schedule** (first EMI 2026-12-05), plus the disbursal credit on 2026-11-02, the +3 date. It is known immediately through the contractual schedule (D5a). | aa |
 
 ### Decision: card SMS exist before +1 (SPEC D19)
 Android SMS permission is all-or-nothing, so the phone sees the Axis card's spend SMS from day one. At T0 the card is **visible** (`sms_only`), its purchases count as spend, and the card bill payments are transfers. Nothing is counted twice. **The +1 reveal is the statement:** the revolving balance, interest and GST, the limit and the utilisation. It is not the purchases. (`PersonaA(card_sms=False)` is the invisible-card variant used by the D4 retro-reclassification test.)
 
 ## 3. Expected changes
-| Step | Must emit (asserted) | Expected story (not asserted) |
+| Step | Must emit (asserted) | What the engine shows (not asserted; numbers in `DEMO_NUMBERS.md`) |
 |---|---|---|
-| **T0** | trigger `baseline`, no diff | Fair band. Card visible via SMS but not linked → credit pillar excluded (coverage 85%). 3 of 4 known accounts linked → confidence discounted. Dip risk before the Oct 1 salary > 50% (₹5,000 floor, D17). Bounce risk shown for a named debit. Recs include `cancel_overlapping_subs:ott_video`. Whether `auto_sweep` appears is the D7 rule's call. |
-| **+1** | `ACCOUNT_LINKED`, `NEW_DATA_REVEALED`, `HIGH_COST_DEBT_FOUND`, `REC_ADDED` (for `pay_down_card:*`, caused_by `HIGH_COST_DEBT_FOUND`) | Revolving ~₹40k surfaces. Spend rises slightly and savings rate falls (interest and GST become visible; purchases were already seen via SMS). Credit pillar enters at ≤ 40 → score drops, and D24 attributes the whole drop to new data ("linking your card showed…"). Confidence rises (4 of 4 linked). `pay_down_card` probably ranks #1. |
-| **+2** | `INCOME_INCREASED` | *Corrected after Phases 3/3.5:* dip risk does **not** fall. A spends the hike (spend-down behaviour), and revolving keeps growing (amounts in `DEMO_NUMBERS.md`). That is exactly why D30/D31 matter: the debt-growth alert fires, and the hike should go to the card. |
-| **+3** | `NEW_EMI_ADDED`, `ACCOUNT_LINKED`; and **not** `NEW_DATA_REVEALED` (a brand-new loan is behaviour) | EMI-to-income rises. The disbursal lands in the salary account, but borrowed cash doesn't count as buffer (D29), and it is earmarked out of the forecast (D33, shown as an assumption). The new EMI appears as a bounce risk on 2026-12-05. The dip *before the Dec 1 salary* can't rise further (it is already ~100%): the EMI lands after that salary. Bounce risk rises (`BOUNCE_RISK_UP` expected; the new EMI on 2026-12-05 appears as a named bounce risk). Dip-based reason codes are withheld (SPEC D34). `change_emi_tenure` rank moves. The disbursal is **not** income. |
+| **T0** | trigger `baseline`, no diff | Fair. Card visible via SMS but not linked → credit pillar excluded, 3 of 4 linked → confidence capped at Medium. **Dip before the Oct 1 salary ≈ 91% (not saturated)**, with the Oct 10 EMI a named bounce risk. **Top suggestion: "Link your AXIS card statement so we can see its balance"** (data action, D40). No savings push while card debt is unknown (D30e). The tenure-extension what-if is offered (bounce ≥ 20%), extra interest first. |
+| **+1** | `ACCOUNT_LINKED`, `NEW_DATA_REVEALED`, `HIGH_COST_DEBT_FOUND`, `REC_ADDED` (for `pay_down_card:*`, caused_by `HIGH_COST_DEBT_FOUND`) | The whole score drop is new data (D24). The buffer now nets the revealed revolving balance (D36); the band may change. `DEBT_GROWING` fires (revolving grew over the last 3 statements). **#1: clear the card from savings, then set autopay to the full statement**, keeping a cushion, cash-neutral, confidence Medium, with the rebuild downside shown (D38). The link action is removed, caused by `ACCOUNT_LINKED`. The dip saturates (≥ 98%) once the real card payments are known, so no dip codes. |
+| **+2** | `INCOME_INCREASED` | `BOUNCE_RISK_DOWN` (the hike lowers the largest EMI bounce risk). Card-first actions stay on top; **no savings sweep is ever suggested while the card revolves**. A payday card sweep is not affordable under the bounce rule, so none appears. |
+| **+3** | `NEW_EMI_ADDED`, `ACCOUNT_LINKED`; and **not** `NEW_DATA_REVEALED` (a brand-new loan is behaviour) | `BOUNCE_RISK_UP` (the new EMI lifts the largest EMI bounce risk). Loan cash is earmarked out of buffer and forecast (D33), with the "if you keep it" alternative. Tenure extension is offered as an explore-only what-if (D37). |
 
-### Phase 4 story (SPEC D30–D32): expected, and what the engine does
-Asserted: only the reason codes in the table above (`tests/test_replay.py`). What `make demo` shows, qualitatively (numbers in `DEMO_NUMBERS.md`):
-- **T0:** the card is visible via SMS but not linked, so its debt is unknown and no savings sweep is suggested (D30e). The top action is the overlapping-OTT cancellation.
-- **+1:** as expected, the top action is **clearing the card from savings** while keeping a cushion. It is cash-neutral for the salary account (the next bill stays at its usual amount), and "once clear, pay in full" is shown as an assumption. The existing ₹8,000 savings transfer is recognised, and the suggestion is to *redirect* it, not to save more.
-- **+2:** the **debt-growth alert** fires (`DEBT_GROWING`, a FACT with amounts), and "on payday, send ₹X extra to the card" appears, caused by `INCOME_INCREASED` and `DEBT_GROWING`. The hike goes to the card, not to a bigger savings sweep.
-- **+3:** `BOUNCE_RISK_UP` (the largest EMI bounce risk moves ≥ 10 pp). The payday card sweep is **removed**, caused by `NEW_EMI_ADDED` and `BOUNCE_RISK_UP` ("pauses any sweep increase"). Tenure extensions appear with their lifetime cost.
-- **Dip-based reason codes are withheld at every step:** the dip metric is saturated (D34). Bounce risk leads.
+Rule: if an expected story item doesn't hold, we first check the persona parameters and then the engine logic. We never special-case A. Any persona parameter change is recorded in §5.
 
 ### Demo beat: Uncategorised → correction → rule (Phase 3 review, point 7)
 Persona A pays a home-tiffin service, **GHARGUTI DABBA**, ₹1,800 on the 3rd of each month on the Axis card. The ML fallback can't place the name (confidence < 0.9), so it shows as **Uncategorised**, which counts as essential. In the app, the user taps it and picks "Dining". `POST /v1/merchant-rules` creates a per-user rule: every past and future Gharguti Dabba transaction becomes `dining` with `category_source: user`, and the next snapshot reflects it. We do not calibrate the categoriser for the demo; the correction flow is the point.
@@ -62,6 +56,7 @@ Persona A pays a home-tiffin service, **GHARGUTI DABBA**, ₹1,800 on the 3rd of
 | 2026-09-24 | Persona A `card_sms` (new, True) | Card spend SMS rendered for every card purchase | The D19 decision above. |
 | 2026-09-24 | Persona A `sweep_to_savings`, `spend_down_threshold`, `card_pay_ratio` | 4,000 → 8,000; 16,000 → 20,000; 0.32 → 0.30 | Engine run at T0 gave 45 (Poor): savings rate −2.8%, 0 of 5 clean cycles. The first two changes make A a "save first, run short later" user (T0: 63 Fair, 2 of 5 clean cycles, latest cycle low ≈ ₹0). The third restores revolving to ₹38.7k at +1 (engine-level), inside the band. |
 | 2026-09-24 | Persona C `annual_prime`, `netflix_monthly` (new) | Annual Prime (₹1,499, May) + Netflix monthly on card | Exercises annual-plan detection and an overlap with an annual member (D23). |
+| 2026-09-24 | Replay dates (D41), not a persona parameter | T0/+1 2026-09-20 → 2026-09-03; +2/+3 2026-11-20 → 2026-11-02; the new loan's disbursal moves with the +3 date | Early warning with a month of runway (pre-Phase-5 fix 6). No behaviour parameter changed. |
 | 2026-09-24 | Persona A `tiffin` (new) | ₹1,800 on the 3rd, on the Axis card | The Uncategorised demo beat. It sits on the card so it only reaches cash through the 30% card payment: on the salary account it pushed A's T0 balance below the floor (₹4,302), turning the dip "forecast" into a fact dated today. On the card, T0 opens at ₹5,209 and revolving at +1 is ₹42.4k (in band). |
 | 2026-09-23 | Persona A card statement before history | Added the March statement's payment (due 2026-04-07) | The first in-window payment was missing, which understated early card payments. |
 

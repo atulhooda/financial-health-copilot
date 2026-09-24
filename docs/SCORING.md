@@ -1,6 +1,6 @@
 # Hisaab Financial Health Score
 
-Status: **Approved 2026-09-23 (floor per SPEC D17).** Parameters live in `backend/config/scoring.yaml`, and this doc and that file must agree (a test checks the weights and breakpoints).
+Status: **Version 2 (pre-Phase-5 fix, 2026-09-24): the score never punishes paying down debt.** v1 capped the credit pillar at 40 whenever any balance revolved, and counted savings sitting against card debt as a buffer. So redirecting money to the card *lowered* the projected score. Floor per SPEC D17. Parameters live in `backend/config/scoring.yaml`, and this doc and that file must agree (a test checks the weights and breakpoints).
 
 ## 1. Principles
 - **0–100, six pillars, fixed weights.** Every pillar maps a single observed metric to 0–100 by **piecewise-linear interpolation** between documented breakpoints. Values beyond the end breakpoints are clamped.
@@ -13,9 +13,9 @@ Status: **Approved 2026-09-23 (floor per SPEC D17).** Parameters live in `backen
 | # | Pillar | Weight | Metric (definition in SPEC §6.1) |
 |---|---|---|---|
 | P1 | Savings | 20 | `savings_rate`, trailing 3 cycles |
-| P2 | Emergency buffer | 20 | `emergency_buffer_months` |
+| P2 | Emergency buffer | 20 | `emergency_buffer_months`, net of visible revolving card debt |
 | P3 | Debt load | 20 | `emi_to_income` |
-| P4 | Credit health | 15 | `credit_utilisation`, capped if revolving |
+| P4 | Credit health | 15 | half utilisation, half revolving/limit (continuous) |
 | P5 | Pre-salary liquidity | 15 | share of clean cycles (stayed above floor, no bounce), last ≤6 cycles |
 | P6 | Spending stability | 10 | discretionary spend drift ratio |
 
@@ -26,7 +26,7 @@ Status: **Approved 2026-09-23 (floor per SPEC D17).** Parameters live in `backen
 |---|---|---|---|
 | 0 | 50 | 75 | 100 |
 
-**P2 Emergency buffer (months of essential spend)**. Liquid balance excludes loan disbursals from the last 90 days (SPEC D29), and essential spend includes Uncategorised (D21).
+**P2 Emergency buffer (months of essential spend).** Buffer money = liquid balance − unspent recent loan cash (D29/D33) − **visible revolving card balance** (savings sitting against card debt of the same size are not a buffer; an unlinked card's unknown balance is not guessed). Essential spend includes Uncategorised (D21). Negative buffer money counts as 0.
 | 0 | 1 | 3 | ≥ 6 |
 |---|---|---|---|
 | 0 | 30 | 70 | 100 |
@@ -37,13 +37,22 @@ Status: **Approved 2026-09-23 (floor per SPEC D17).** Parameters live in `backen
 | 100 | 60 | 30 | 0 |
 No EMIs → 100.
 
-**P4 Credit health**
-Base score from overall utilisation:
+**P4 Credit health** (continuous: paying card debt down can only raise it)
+`P4 = 0.5 × U(utilisation) + 0.5 × R(revolving / limit)`, with utilisation = latest statement balance / limit:
+
+U, utilisation:
 | ≤ 10% | 30% | 50% | ≥ 90% |
 |---|---|---|---|
 | 100 | 75 | 40 | 0 |
-Then, if `revolving_balance > 0`, P4 = min(base, 40). Carrying a balance at ~3.5%/month is the costliest habit we can detect.
+
+R, revolving (carried past the due date) as a share of the limit:
+| 0% | 5% | 15% | 30% | ≥ 50% |
+|---|---|---|---|---|
+| 100 | 70 | 40 | 15 | 0 |
+
 No card known → excluded (`no credit card`). Card known but not linked, **including a card visible only through SMS** (no limit, no statement) → excluded (`card not linked`), and it lowers forecast *confidence* instead.
+
+**Properties (tested):** moving money from savings to revolving card debt never lowers the current score (P2's buffer money is unchanged, P4 rises). Paying card debt down faster with the same spending never lowers the 12-month projected score.
 
 **P5 Pre-salary liquidity (observed).** Over the last ≤6 complete pay cycles (calendar months if income is irregular), a cycle is **clean** if the operating balance never went below the safety floor and no bounce/return charge was posted.
 `P5 = 100 × clean_cycles / cycles − 25 × observed_bounce_charges`, clamped to 0–100. Needs ≥2 cycles.

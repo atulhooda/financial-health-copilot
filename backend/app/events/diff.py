@@ -15,7 +15,7 @@ REMOVAL_DRIVERS = {
     "pay_down_card": ["DEBT_CLEARED"],
     "redirect_sweep": ["DEBT_CLEARED"],
     "cancel_overlapping_subs": ["SUBSCRIPTION_CANCELLED"],
-    "change_emi_tenure": ["BOUNCE_RISK_DOWN", "EMI_CLOSED"],
+    "link_account": ["ACCOUNT_LINKED"],
 }
 
 

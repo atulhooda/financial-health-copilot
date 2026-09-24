@@ -50,11 +50,19 @@ def test_card_link_is_new_data_and_adds_pay_down(timeline):
     assert r.diff.payload["score"]["behaviour"] == 0 and r.diff.payload["score"]["new_data"] < 0
 
 
-def test_new_loan_is_behaviour_and_pauses_the_sweep(timeline):
+def test_t0_leads_with_the_data_action_which_linking_removes(timeline):
+    t0, one = timeline[1][0], timeline[1][1]
+    assert t0.snapshot.payload["recommendations"][0]["type"] == "link_account"  # fix 5 (D30e)
+    gone = next(c for c in one.diff.payload["rec_changes"] if c["type"] == "link_account")
+    assert gone["change"] == "removed" and gone["caused_by"] == ["ACCOUNT_LINKED"]
+
+
+def test_new_loan_is_behaviour_raises_bounce_risk_and_no_sweep_is_pushed(timeline):
     r = timeline[1][3]
-    assert "NEW_DATA_REVEALED" not in r.diff.reason_codes
-    removed = [c for c in r.diff.payload["rec_changes"] if c["change"] == "removed" and c["type"] == "auto_sweep"]
-    assert removed and "NEW_EMI_ADDED" in removed[0]["caused_by"]  # D32: the new EMI pauses the sweep
+    assert "NEW_DATA_REVEALED" not in r.diff.reason_codes and "BOUNCE_RISK_UP" in r.diff.reason_codes
+    for step in timeline[1][1:]:  # debt before savings: never a savings sweep while the card revolves
+        assert not [x for x in step.snapshot.payload["recommendations"]
+                    if x["type"] == "auto_sweep" and x["params"]["target"] == "savings"]
 
 
 def test_dip_codes_withheld_while_saturated(timeline):

@@ -10,11 +10,14 @@ from app.engines.financial import compute_metrics
 from app.engines.projection import Modifier, project
 from app.engines.score import compute_score
 from app.engines.simulate import (
+    _size_sweep,
+    _with_sweep,
     build_context,
     evaluate,
     gen_auto_sweep,
     gen_pay_down_card,
     gen_redirect_sweep,
+    max_mandate_bounce,
     recommend,
     what_if_new_emi,
 )
@@ -51,25 +54,40 @@ def test_new_emi_what_if_matches_the_formula_and_states_its_rate(replayed):
     assert r.extra["alt_tenure"]["tenure_months"] == 18 and abs(r.extra["alt_tenure"]["emi_paise"] - 3_743_00) <= 100
     rate = next(a for a in r.assumptions if a["key"] == "emi_rate")
     assert rate["value"] == 15 and rate["source"] == "config" and "assumed" in rate["text"]
-    first = next(a for a in r.assumptions if a["key"] == "first_emi")
-    assert dt.date.fromisoformat(first["value"]) == ctx.forecast.next_income_date + dt.timedelta(days=5)
+    assert "first_emi" not in {a["key"] for a in r.assumptions}  # fix 4: the EMI date is not baked in
+    opts = {o["option"]: o for o in r.impact["emi_dates"]["options"]}
+    assert opts["just_after_payday"]["first_due"] == ctx.forecast.next_income_date + dt.timedelta(days=2)
+    assert opts["30_days_from_today"]["first_due"] == ctx.view.as_of + dt.timedelta(days=30)
+    gap = opts["30_days_from_today"]["new_emi_bounce_risk"] - opts["just_after_payday"]["new_emi_bounce_risk"]
+    advice = r.impact["emi_dates"]["advice"]
+    assert (advice is not None) == (gap >= 0.05)
+    if advice:
+        assert advice["text"] == "Ask for an EMI date right after your salary date"
     assert r.impact["emi_to_income_after"] > r.impact["emi_to_income_before"]
     assert r.rank is None  # a what-if is never auto-recommended (D8)
     user_rate = evaluate(ctx, what_if_new_emi(ctx, 60_000_00, 12, annual_rate_bps=1200))
     assert next(a for a in user_rate.assumptions if a["key"] == "emi_rate")["source"] == "user"
 
 
-def test_clearing_the_card_is_cash_neutral_and_keeps_a_cushion(replayed):
+def test_clearing_the_card_is_cash_neutral_explicit_and_honest(replayed):
     ctx = replayed(1)
     (a,) = gen_pay_down_card(ctx)
     nid = ctx.forecast.next_income_date
     due_before = sum(f.amount_paise for f in ctx.forecast.schedule if f.direction == "debit" and f.date < nid
                      and f.kind != "card_payment")
-    assert a.params["cushion_paise"] == ctx.view.floor_paise + due_before
+    uncovered = max(0, due_before - ctx.view.operating.balance_paise)
+    post = a.extra["post_clear_check"]
+    assert a.params["cushion_paise"] == ctx.view.floor_paise + uncovered + post["extra_cushion_paise"]
     assert a.params["clears"] and a.params["amount_paise"] >= ctx.card.revolving_paise
+    assert a.params["steps"][1] == "Set card autopay to the full statement amount"  # fix 3: step 2 explicit
     r = evaluate(ctx, a)
+    assert r.confidence["label"] in ("Medium", "Low")  # depends on a behaviour change
     assert abs(r.impact["bounce_risk_after"] - r.impact["bounce_risk_before"]) <= 0.02  # next bill stays usual
     assert r.impact["months_to_clear_card"] == 1 and r.impact["revolving_12m_with_action_paise"] == 0
+    down = r.extra["downside"]  # going back to paying ~30% rebuilds the balance
+    assert down["rebuild_to_paise"] > 0 and 1 <= down["months_to_rebuild"] <= 12
+    assert down["interest_saved_12m_if_back_to_usual_paise"] < r.impact["card_interest_saved_12m_paise"]
+    assert post["horizon_days"] == 90 and (not post["raises"] or post["extra_cushion_paise"] > 0)
     assert "pay_in_full_after" in {x["key"] for x in r.assumptions}
     assert next(x for x in r.assumptions if x["key"] == "card_rate")["source"] == "statement"  # a FACT, not assumed
 
@@ -96,19 +114,34 @@ def test_d26_freed_cash_is_half_spent_unless_swept(replayed):
     assert expected <= gain <= expected * 1.02  # plus savings interest compounding on the difference
 
 
-def test_sweep_respects_the_bounce_limit_and_is_paused_by_the_new_emi(replayed):
-    ctx2, ctx3 = replayed(2), replayed(3)
-    (sweep,) = [a for a in gen_auto_sweep(ctx2) if a.params["target"] == "card"]
-    r = evaluate(ctx2, sweep)
-    assert r.impact["bounce_risk_after"] - r.impact["bounce_risk_before"] <= 0.02 + 1e-9
-    assert r.confidence["label"] in ("Medium", "Low")  # capped: depends on a behavioural assumption (D7)
-    assert gen_auto_sweep(ctx3) == []  # +3: the new EMI leaves no room for a sweep (D32)
+def test_sweep_size_is_the_largest_step_within_the_bounce_limit(replayed):
+    from app.engines.simulate import _rerun
+
+    ctx = replayed(2)
+    x = _size_sweep(ctx, to_card=True)
+    base = max_mandate_bounce(ctx.forecast)
+
+    def rise(amount):
+        return max_mandate_bounce(_rerun(ctx, _with_sweep(ctx, ctx.forecast.schedule, amount, True))) - base
+    step = ctx.cfg["sweep_step_paise"]
+    assert (x == 0 or rise(x) <= 0.02 + 1e-9) and rise(x + step) > 0.02
+    assert [a.params["amount_paise"] for a in gen_auto_sweep(ctx)] == ([x] if x >= 1_000_00 else [])
+
+
+def test_tenure_extension_is_only_an_offered_what_if(replayed):
+    ctx = replayed(3)
+    ranked, _, offers = recommend(ctx)
+    assert not [r for r in ranked if r.type == "change_emi_tenure"]  # fix 2: never a recommendation
+    assert max_mandate_bounce(ctx.forecast) >= 0.20 and offers
+    for o in offers:
+        assert o.rank is None and o.title.startswith("Explore: ₹") and "more interest" in o.title
+        assert o.extra["lifetime_cost_paise"] > 0 and "lender_approval" in {a["key"] for a in o.assumptions}
 
 
 def test_recommendations_are_deterministic_and_ranked(replayed):
     ctx = replayed(1)
-    r1, p1 = recommend(ctx)
-    r2, p2 = recommend(ctx)
+    r1, p1, _ = recommend(ctx)
+    r2, p2, _ = recommend(ctx)
     assert [(r.action_key, r.impact) for r in r1] == [(r.action_key, r.impact) for r in r2] and p1 == p2
     assert r1[0].type == "pay_down_card"  # D32: at +1 the top action is clearing the card from savings
     keys = [(-r.impact["score_delta_12m"], -r.impact["annual_impact_paise"], r.action_key) for r in r1]

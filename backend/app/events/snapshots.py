@@ -63,10 +63,10 @@ def compute_payload(session: Session, user_id: str, as_of: dt.date, categoriser:
     m = compute_metrics(view)
     sc = compute_score(m)
     fc, conf, bt = forecast_with_confidence(view, m.recurring, m.coverage)
-    recs, plan = ([], None)
+    recs, plan, offers = ([], None, [])
     if fc.available:
         ctx = build_context(view, m, sc, fc, conf)
-        recs, plan = recommend(ctx)
+        recs, plan, offers = recommend(ctx)
     top_bounce = max((b for b in fc.bounce_risks if b.mandate), key=lambda b: (b.probability, -b.due_date.toordinal()),
                      default=None)
     alerts = []
@@ -113,6 +113,7 @@ def compute_payload(session: Session, user_id: str, as_of: dt.date, categoriser:
         "alerts": alerts,
         "recommendations": recs,
         "combined_plan": plan,
+        "what_if_offers": offers,  # explore-only (never ranked): e.g. tenure extension when bounce risk >= 20%
     }
     return jsonable(payload)
 

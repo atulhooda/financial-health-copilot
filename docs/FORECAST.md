@@ -9,12 +9,12 @@ band covers about 80%. This is the number behind confidence and the one we quote
 
 | Persona | Point | Origins | Days | P10–P90 coverage | Confidence |
 |---|---|---|---|---|---|
-| demo-a | step t0 (2026-09-20) | 8 | 321 | **65%** | Medium: band held on 65% of past days, target 80% |
-| demo-a | step 1 (2026-09-20) | 8 | 321 | **65%** | Medium: band held on 65% of past days, target 80% |
-| demo-a | step 2 (2026-11-20) | 12 | 503 | **67%** | Medium: band held on 67% of past days, target 80% |
-| demo-a | step 3 (2026-11-20) | 12 | 503 | **66%** | Medium: band held on 66% of past days, target 80% |
-| demo-b | T0 (2026-09-20) | 8 | 319 | **70%** | Medium: band held on 70% of past days, target 80% |
-| demo-c | T0 (2026-09-20) | 7 | 286 | **84%** | Medium: band held on 84% of past days, target 80%; capped at Medium: only 5.9 months of history |
+| demo-a | step t0 (2026-09-03) | 7 | 272 | **61%** | Medium: band held on 61% of past days, target 80% |
+| demo-a | step 1 (2026-09-03) | 7 | 272 | **61%** | Medium: band held on 61% of past days, target 80% |
+| demo-a | step 2 (2026-11-02) | 11 | 452 | **64%** | Medium: band held on 64% of past days, target 80% |
+| demo-a | step 3 (2026-11-02) | 11 | 452 | **64%** | Medium: band held on 64% of past days, target 80% |
+| demo-b | as of (2026-09-20) | 8 | 319 | **70%** | Medium: band held on 70% of past days, target 80% |
+| demo-c | as of (2026-09-20) | 7 | 286 | **84%** | Medium: band held on 84% of past days, target 80%; capped at Medium: only 5.9 months of history |
 
 ## Dip calibration
 
@@ -28,8 +28,8 @@ breach frequency|; 0 is perfect. Brier is the mean squared error of the individu
 | demo-a | step 1 | 7 | 65% | 57% | **8.1 pts** | 0.25 |
 | demo-a | step 2 | 11 | 64% | 55% | **9.6 pts** | 0.19 |
 | demo-a | step 3 | 11 | 64% | 55% | **9.6 pts** | 0.19 |
-| demo-b | T0 | 7 | 35% | 0% | **34.9 pts** | 0.19 |
-| demo-c | T0 | 7 | 0% | 0% | **0.0 pts** | 0.00 |
+| demo-b | as of | 7 | 35% | 0% | **34.9 pts** | 0.19 |
+| demo-c | as of | 7 | 0% | 0% | **0.0 pts** | 0.00 |
 
 ## Where the error comes from: income side vs spend side
 
@@ -38,12 +38,12 @@ vs what actually happened (predicted − actual, ₹ per 30 days). Net < 0 means
 
 | Persona | Point | Income side | Spend side | Net |
 |---|---|---|---|---|
-| demo-a | step t0 | +0 (+0%) | +2,617 (+3%) | -2,617 |
-| demo-a | step 1 | +0 (+0%) | +2,617 (+3%) | -2,617 |
-| demo-a | step 2 | -3,951 (-4%) | +111 (+0%) | -4,062 |
-| demo-a | step 3 | -27,245 (-24%) | +111 (+0%) | -27,355 |
-| demo-b | T0 | -9,428 (-39%) | -6,817 (-31%) | -2,611 |
-| demo-c | T0 | +0 (+0%) | -881 (-1%) | +881 |
+| demo-a | step t0 | +0 (+0%) | +298 (+0%) | -298 |
+| demo-a | step 1 | +0 (+0%) | +298 (+0%) | -298 |
+| demo-a | step 2 | -4,396 (-4%) | -1,015 (-1%) | -3,381 |
+| demo-a | step 3 | -30,319 (-24%) | -1,015 (-1%) | -29,304 |
+| demo-b | as of | -9,428 (-39%) | -6,817 (-31%) | -2,611 |
+| demo-c | as of | +0 (+0%) | -881 (-1%) | +881 |
 
 ## Reading this
 

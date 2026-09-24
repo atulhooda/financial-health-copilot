@@ -28,16 +28,16 @@ def seed() -> None:
     from app.core.clock import FixedClock, set_clock
     from app.db.repo import UserRepo
     from app.db.session import session_scope
-    from app.demo.personas import T0
+    from app.demo.personas import BC_AS_OF, T0
     from app.demo.scenario import seed_payloads
     from app.ingest.registry import adapter_for
     from app.ingest.service import ingest_batch
     from app.pipeline.categorise.train import get_categoriser
 
-    clock = FixedClock(T0)
-    set_clock(clock)
     cat = get_categoriser()
     for pid in ("demo-a", "demo-b", "demo-c"):
+        clock = FixedClock(T0 if pid == "demo-a" else BC_AS_OF)
+        set_clock(clock)
         with session_scope() as s:
             UserRepo(s, pid).erase_all()
         for source, payload in seed_payloads(pid):
@@ -102,9 +102,25 @@ def _print_step(r, fmt) -> None:
     for rec in p["recommendations"][:3]:
         i = rec["impact"]
         typer.echo(f"     #{rec['rank']} {rec['title']}")
+        if i["kind"] == "data":
+            typer.echo(f"         data action: accounts linked {i['accounts_linked_before']} -> "
+                       f"{i['accounts_linked_after']} of {i['accounts_known']}; unlocks {', '.join(i['unlocks'])}")
+            continue
         typer.echo(f"         12-month score {i['score_12m_baseline']} -> {i['score_12m_with_action']} "
                    f"({i['score_delta_12m']:+d}); {fmt(i['annual_impact_paise'])} a year; bounce risk "
                    f"{i['bounce_risk_before']:.0%} -> {i['bounce_risk_after']:.0%}; confidence {rec['confidence']['label']}")
+        down = rec["extra"].get("downside")
+        if down and down.get("rebuild_to_paise"):
+            typer.echo(f"         if you go back to paying ~{down['pay_share']:.0%}: the balance rebuilds to about "
+                       f"{fmt(down['rebuild_to_paise'])} within {down['months_to_rebuild']} months")
+        chk = rec["extra"].get("post_clear_check") or {}
+        if chk.get("raises"):
+            typer.echo(f"         paying the full statement raises bounce risk ({chk['bounce_risk_before']:.0%} -> "
+                       f"{chk['bounce_risk_after']:.0%} over 90 days): cushion sized up by "
+                       f"{fmt(chk['extra_cushion_paise'])}")
+    for o in p.get("what_if_offers", []):
+        typer.echo(f"     explore: {o['title']}  [bounce risk {o['impact']['bounce_risk_before']:.0%} -> "
+                   f"{o['impact']['bounce_risk_after']:.0%}]")
     if r.diff:
         typer.echo(f"     reason codes: {', '.join(r.diff.reason_codes)}")
         for c in r.diff.payload["rec_changes"]:
@@ -133,7 +149,7 @@ def backtest_report() -> None:
 
     from app.core.clock import FixedClock
     from app.db.session import make_sessionmaker
-    from app.demo.personas import T0
+    from app.demo.personas import BC_AS_OF
     from app.demo.scenario import persona_a_steps, seed_payloads
     from app.engines.backtest import forecast_with_confidence
     from app.engines.financial import compute_metrics
@@ -162,9 +178,10 @@ def backtest_report() -> None:
         run("demo-a", f"step {step.name}", step.as_of)
     for user in ("demo-b", "demo-c"):
         for source, payload in seed_payloads(user):
-            ingest_batch(s, user, adapter_for(source, FixedClock(T0)).parse(payload, user), cat, FixedClock(T0))
+            ingest_batch(s, user, adapter_for(source, FixedClock(BC_AS_OF)).parse(payload, user), cat,
+                         FixedClock(BC_AS_OF))
         s.commit()
-        run(user, "T0", T0)
+        run(user, "as of", BC_AS_OF)
     _write_forecast_report(rows, REPO_DIR / "docs" / "FORECAST.md")
     for user, label, _as_of, fc, conf, bt in rows:
         typer.echo(f"{user} {label:7s} coverage={bt.coverage:.1%} origins={len(bt.origins)} brier={bt.brier} "

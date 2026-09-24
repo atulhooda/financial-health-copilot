@@ -31,11 +31,14 @@ from app.engines.projection import (
     project,
 )
 from app.engines.recurring import RecurringItem
-from app.engines.schedule import ScheduledFlow
+from app.engines.schedule import ScheduledFlow, build_schedule
 from app.engines.score import Score
 from app.engines.view import View
 
 SWEEP_MAX_STEPS = 80  # ₹500 x 80 = ₹40,000: upper bound of the sweep search
+EMI_DAYS_AFTER_PAYDAY = 2  # "just after payday" option for a new EMI
+LONG_HORIZON = 90  # days: post-clearing bounce check and EMI what-ifs look 2-3 months ahead
+BOUNCE_TOLERANCE = 0.02
 LEVELS = ("Low", "Medium", "High")
 
 
@@ -51,6 +54,19 @@ class Context:
     baseline: Projection
     card: CardMetrics | None
     cfg: dict
+    _base90: Forecast | None = None
+
+    def forecast90(self, schedule_fn=None) -> Forecast:
+        """A 90-day forecast (same random draws) for checks beyond the 45-day horizon."""
+        start, end = self.view.as_of + dt.timedelta(days=1), self.view.as_of + dt.timedelta(days=LONG_HORIZON)
+        sched = build_schedule(self.view, self.metrics.recurring, start, end)
+        if schedule_fn is None and self._base90 is not None:
+            return self._base90
+        fc, _ = run_forecast(self.view, self.metrics.recurring, schedule=schedule_fn(sched) if schedule_fn else sched,
+                             horizon=LONG_HORIZON, pools=self.pools)
+        if schedule_fn is None:
+            self._base90 = fc
+        return fc
 
     @property
     def saturated(self) -> bool:
@@ -168,12 +184,17 @@ def _reserve(ctx: Context) -> list:
 
 
 def _cushion(ctx: Context) -> int:
-    """D30: floor + scheduled debits due before the next income, on any deposit account."""
+    """D30: floor + scheduled debits due before the next income that the salary account can't already cover.
+
+    Refined in the pre-Phase-5 fixes: right after payday the salary account already holds this month's rent,
+    EMI and SIP, so counting them against savings too would double-protect them and block clearing the card."""
     nid = ctx.forecast.next_income_date or ctx.view.as_of
     deposits = {a.account_id for a in ctx.view.of_kind("savings", "current")}
     due = sum(f.amount_paise for f in ctx.forecast.schedule if f.direction == "debit" and f.date < nid
               and f.kind != "card_payment" and f.account_id in deposits)
-    return ctx.view.floor_paise + due
+    op = ctx.view.operating
+    covered = max(0, (op.balance_paise or 0) - ctx.metrics.earmarked_loan_paise) if op else 0
+    return ctx.view.floor_paise + max(0, due - covered)
 
 
 def _card_rate_assumption(ctx: Context) -> dict:
@@ -203,30 +224,65 @@ def gen_pay_down_card(ctx: Context) -> list[Action]:
     """D30(c): use part of savings to clear the card, keep a cushion.
 
     Cash-neutral for the salary account: savings cover the carried balance AND whatever part of the current
-    statement exceeds what the user usually pays, so the next bill stays at the usual amount. After that the
-    user pays each month's purchases in full (an explicit assumption)."""
+    statement exceeds what the user usually pays, so the next bill stays at the usual amount. Step 2 is explicit:
+    set card autopay to the full statement amount. We show the downside of not doing step 2, cap confidence at
+    Medium (it depends on a behaviour change), and check bounce risk 90 days out under pay-in-full; if paying
+    the full statement raises it, we say so and keep that much more in savings as a cushion."""
     card = ctx.card
     if not card or not card.revolving_paise:
         return []
     cushion = _cushion(ctx)
     reserve = sum(a.balance_paise for a in _reserve(ctx))
-    available = max(0, reserve - cushion)
     known = next((f for f in ctx.forecast.schedule if f.kind == "card_payment" and f.spread is None), None)
     usual = known.amount_paise if known else 0
     target = max(card.revolving_paise, (card.statement_balance_paise or 0) - usual) if known else card.revolving_paise
+    amount, clears = _pay_down_amount(max(0, reserve - cushion), target, card.revolving_paise)
+    if amount < 1_000_00:
+        return []
+    schedule = _pay_down_schedule(card, amount, clears)
+    extra, post = 0, {}
+    if clears:  # 90-day bounce check under pay-in-full
+        base90, act90 = ctx.forecast90(), ctx.forecast90(schedule)
+        before, after = max_mandate_bounce(base90), max_mandate_bounce(act90)
+        post = {"horizon_days": LONG_HORIZON, "bounce_risk_before": before, "bounce_risk_after": after,
+                "raises": after - before > BOUNCE_TOLERANCE, "extra_cushion_paise": 0}
+        if post["raises"]:
+            bills = {(f.date, f.item_id): f.amount_paise for f in base90.schedule if f.kind == "card_payment"}
+            dearer = [(f.date, f.amount_paise - bills.get((f.date, f.item_id), 0)) for f in act90.schedule
+                      if f.kind == "card_payment" and f.amount_paise > bills.get((f.date, f.item_id), 0)]
+            extra = -(-sum(d for _, d in dearer) // 500_00) * 500_00
+            amount, clears = _pay_down_amount(max(0, reserve - cushion - extra), target, card.revolving_paise)
+            schedule = _pay_down_schedule(card, amount, clears, top_ups=dearer, operating=ctx.forecast.account_id)
+            post.update(extra_cushion_paise=extra,
+                        bounce_risk_after_with_cushion=max_mandate_bounce(ctx.forecast90(schedule)))
+    cushion += extra
+    downside = _rebuild_downside(ctx, amount) if clears else None
+    if clears:
+        title = (f"Use {format_inr(amount)} of savings to clear your card, then set card autopay to the full "
+                 f"statement amount; keep {format_inr(cushion)} as a cushion")
+    else:
+        title = f"Use {format_inr(amount)} of savings to pay down your card; keep {format_inr(cushion)}"
+    steps = [f"Move {format_inr(amount)} from savings to the card"]
+    if clears:
+        steps.append("Set card autopay to the full statement amount")
+    return [Action(f"pay_down_card:{card.account_id}", "pay_down_card", title,
+                   {"amount_paise": amount, "cushion_paise": cushion, "clears": clears, "next_bill_paise": usual,
+                    "steps": steps},
+                   Modifier(savings_to_card_now=amount, pay_in_full_once_clear=clears), schedule,
+                   [_card_rate_assumption(ctx), _savings_rate_assumption(ctx)] + ([PAY_IN_FULL] if clears else []),
+                   ["HIGH_COST_DEBT_FOUND", "DEBT_GROWING"], confidence_cap="Medium" if clears else None,
+                   extra={"downside": downside, "post_clear_check": post})]
+
+
+def _pay_down_amount(available: int, target: int, revolving: int) -> tuple[int, bool]:
     if available >= target:  # round UP to the next ₹100 so nothing is left revolving
         amount = min(available, -(-target // 100_00) * 100_00)
     else:
         amount = available // 100_00 * 100_00
-    if amount < 1_000_00:
-        return []
-    clears = amount >= card.revolving_paise
-    if clears:
-        title = (f"Use {format_inr(amount)} of savings to clear your card; keep {format_inr(cushion)} as a cushion"
-                 + (f" (your next bill stays at the usual {format_inr(usual)})" if known else ""))
-    else:
-        title = f"Use {format_inr(amount)} of savings to pay down your card; keep {format_inr(cushion)}"
+    return amount, amount >= revolving
 
+
+def _pay_down_schedule(card: CardMetrics, amount: int, clears: bool, top_ups=(), operating: str | None = None):
     def schedule(flows):
         out = []
         for f in flows:
@@ -239,13 +295,24 @@ def gen_pay_down_card(ctx: Context) -> list[Action]:
                 out.append(dataclasses.replace(f, amount_paise=new, source="simulated"))
             else:
                 out.append(f)
-        return out
+        out += [ScheduledFlow(d, operating, x, "credit", "Top-up from savings", "topup", "sweep", "simulated", False,
+                              False, f"topup:{d.isoformat()}") for d, x in top_ups if operating]
+        return sorted(out, key=lambda f: f.sort_key())
+    return schedule
 
-    return [Action(f"pay_down_card:{card.account_id}", "pay_down_card", title,
-                   {"amount_paise": amount, "cushion_paise": cushion, "clears": clears, "next_bill_paise": usual},
-                   Modifier(savings_to_card_now=amount, pay_in_full_once_clear=clears), schedule,
-                   [_card_rate_assumption(ctx), _savings_rate_assumption(ctx)] + ([PAY_IN_FULL] if clears else []),
-                   ["HIGH_COST_DEBT_FOUND", "DEBT_GROWING"])]
+
+def _rebuild_downside(ctx: Context, amount: int) -> dict:
+    """If the user clears the card but goes back to paying their usual share, how fast does it come back?"""
+    inp = ctx.inputs
+    p, r, purchases = inp.pay_ratio, inp.card_rate_monthly, inp.card_purchases_paise
+    steady = int(round((1 - p) * purchases / (1 - (1 - p) * (1 + r)))) if (1 - p) * (1 + r) < 1 else None
+    back = project(inp, Modifier(savings_to_card_now=amount, pay_in_full_once_clear=False))
+    goal = 0.9 * steady if steady else None
+    months = next((x.m for x in back.months if goal is not None and x.revolving >= goal), None)
+    return {"pay_share": p, "rebuild_to_paise": steady, "months_to_rebuild": months,
+            "revolving_after_12m_paise": back.months[-1].revolving,
+            "interest_saved_12m_if_back_to_usual_paise":
+                card_interest_total(ctx.baseline) - card_interest_total(back)}
 
 
 def gen_redirect_sweep(ctx: Context) -> list[Action]:
@@ -363,63 +430,113 @@ def gen_cancel_overlapping_subs(ctx: Context) -> list[Action]:
     return out
 
 
-def gen_change_emi_tenure(ctx: Context) -> list[Action]:
-    """Generated when EMI-to-income > 30% or a mandate's bounce risk >= 20% (dip-based trigger withheld, D34)."""
-    if not ((ctx.metrics.emi_to_income or 0) > 0.30 or max_mandate_bounce(ctx.forecast) >= 0.20):
-        return []
+def gen_link_account(ctx: Context) -> list[Action]:
+    """D30(e): while a known card is visible but unlinked, the top suggestion is a data action."""
     out = []
-    for loan in ctx.inputs.loans:
-        if loan.remaining_months is None or loan.remaining_months < 3 or not loan.outstanding_paise:
+    for c in ctx.metrics.cards:
+        if c.revolving_paise is not None:
             continue
-        new_n = loan.remaining_months + 12
-        new_emi = emi_paise(loan.outstanding_paise, loan.rate_bps, new_n)
-        old_total, new_total = loan.emi_paise * loan.remaining_months, new_emi * new_n
-
-        def schedule(flows, key=loan.key, amt=new_emi):
-            return [dataclasses.replace(f, amount_paise=amt, source="simulated")
-                    if f.kind == "emi" and f.merchant_key == key else f for f in flows]
-
-        out.append(Action(
-            f"change_emi_tenure:{loan.key}", "change_emi_tenure",
-            f"Extend your {loan.name} loan by 12 months: EMI {format_inr(loan.emi_paise)} → {format_inr(new_emi)}",
-            {"loan": loan.key, "extra_months": 12, "old_emi_paise": loan.emi_paise, "new_emi_paise": new_emi},
-            Modifier(loan_terms={loan.key: dataclasses.replace(loan, emi_paise=new_emi, remaining_months=new_n)}),
-            schedule, [_unswept_assumption(ctx)], ["NEW_EMI_ADDED", "BOUNCE_RISK_UP"],
-            extra={"lifetime_cost_paise": new_total - old_total}))
+        a = ctx.view.accounts.get(c.account_id)
+        if a is None:
+            continue
+        cov = ctx.metrics.coverage
+        out.append(Action(f"link_account:{a.account_id}", "link_account",
+                          f"Link your {a.institution.upper()} card statement so we can see its balance",
+                          {"account_id": a.account_id, "institution": a.institution, "last4": a.last4},
+                          Modifier(), None, [], ["HIGH_COST_DEBT_FOUND"],
+                          extra={"data_impact": {"accounts_linked_before": cov.get("accounts_linked"),
+                                                 "accounts_linked_after": (cov.get("accounts_linked") or 0) + 1,
+                                                 "accounts_known": cov.get("accounts_known"),
+                                                 "unlocks": ["card balance carried over", "interest rate",
+                                                             "credit utilisation"],
+                                                 "lifts_confidence_cap": "not linked" in " ".join(ctx.confidence.caps)}}))
     return out
 
 
-GENERATORS = (gen_pay_down_card, gen_redirect_sweep, gen_auto_sweep, gen_cancel_overlapping_subs,
-              gen_change_emi_tenure)
+def what_if_change_emi_tenure(ctx: Context, loan_key: str, extra_months: int = 12) -> Action | None:
+    """Borrowing for longer: a what-if (same class as D8), never a recommendation. Extra interest up front."""
+    loan = next((x for x in ctx.inputs.loans if x.key == loan_key), None)
+    if loan is None or loan.remaining_months is None or loan.remaining_months < 3 or not loan.outstanding_paise:
+        return None
+    new_n = loan.remaining_months + extra_months
+    new_emi = emi_paise(loan.outstanding_paise, loan.rate_bps, new_n)
+    extra_interest = new_emi * new_n - loan.emi_paise * loan.remaining_months
+
+    def schedule(flows, key=loan.key, amt=new_emi):
+        return [dataclasses.replace(f, amount_paise=amt, source="simulated")
+                if f.kind == "emi" and f.merchant_key == key else f for f in flows]
+
+    return Action(
+        f"change_emi_tenure:{loan.key}", "change_emi_tenure",
+        f"Explore: {format_inr(extra_interest)} more interest to extend your {loan.name} loan by {extra_months} "
+        f"months (EMI {format_inr(loan.emi_paise)} → {format_inr(new_emi)}); needs the lender's approval",
+        {"loan": loan.key, "extra_months": extra_months, "old_emi_paise": loan.emi_paise, "new_emi_paise": new_emi},
+        Modifier(loan_terms={loan.key: dataclasses.replace(loan, emi_paise=new_emi, remaining_months=new_n)}),
+        schedule,
+        [_unswept_assumption(ctx),
+         _assumption("lender_approval", "Needs the lender's approval; a restructuring fee may apply (not included)",
+                     True, "flag")],
+        [], auto=False, extra={"lifetime_cost_paise": extra_interest})
+
+
+def what_if_offers(ctx: Context) -> list[Action]:
+    """What-ifs the app may OFFER to explore (never rank): tenure extension when a mandate's bounce risk >= 20%."""
+    if max_mandate_bounce(ctx.forecast) < 0.20:
+        return []
+    return [a for a in (what_if_change_emi_tenure(ctx, x.key) for x in ctx.inputs.loans) if a is not None]
+
+
+GENERATORS = (gen_link_account, gen_pay_down_card, gen_redirect_sweep, gen_auto_sweep, gen_cancel_overlapping_subs)
 
 
 # ---- what-ifs (D8) ---------------------------------------------------------------------------------------
 def what_if_new_emi(ctx: Context, principal_paise: int, tenure_months: int,
                     annual_rate_bps: int | None = None) -> Action:
+    """A new EMI (D8 what-if). The first-EMI date is not baked in: both options are evaluated (just after payday
+    vs 30 days from today) and the gap becomes advice: ask for an EMI date right after your salary date."""
     rate = annual_rate_bps if annual_rate_bps is not None else ctx.cfg["consumer_emi_rate_bps"]
     emi = emi_paise(principal_paise, rate, tenure_months)
     alt_n = tenure_months + tenure_months // 2 if tenure_months >= 6 else tenure_months + 6
-    first_due = (ctx.forecast.next_income_date or ctx.view.as_of) + dt.timedelta(days=5)
+    after_payday = (ctx.forecast.next_income_date or ctx.view.as_of) + dt.timedelta(days=EMI_DAYS_AFTER_PAYDAY)
+    default_date = ctx.view.as_of + dt.timedelta(days=30)
     assumptions = [_assumption("emi_rate", f"Interest rate {rate / 100:g}% a year" +
                                ("" if annual_rate_bps is not None else " (assumed; you didn't give one)"),
-                               rate / 100, "pct_per_year", "user" if annual_rate_bps is not None else "config"),
-                   _assumption("first_emi", "First EMI 5 days after your next salary, then monthly on that date "
-                               "(lenders usually let you pick the EMI date)", first_due.isoformat(), "date")]
+                               rate / 100, "pct_per_year", "user" if annual_rate_bps is not None else "config")]
+    return Action("new_emi", "new_emi", f"New EMI of {format_inr(emi)} for {tenure_months} months",
+                  {"principal_paise": principal_paise, "tenure_months": tenure_months, "annual_rate_bps": rate},
+                  Modifier(new_loans=[Loan("new_emi", "New EMI", principal_paise, emi, rate, tenure_months)]),
+                  _emi_schedule(ctx, emi, after_payday), assumptions, [], auto=False,
+                  extra={"emi_paise": emi, "total_interest_paise": emi * tenure_months - principal_paise,
+                         "alt_tenure": {"tenure_months": alt_n, "emi_paise": emi_paise(principal_paise, rate, alt_n)},
+                         "date_options": [("just_after_payday", after_payday), ("30_days_from_today", default_date)]})
 
+
+def _emi_schedule(ctx: Context, emi: int, first_due: dt.date):
     def schedule(flows):
         adds, k = [], 0
-        while (d := add_months(first_due, k)) <= ctx.view.as_of + dt.timedelta(days=90):
+        while (d := add_months(first_due, k)) <= ctx.view.as_of + dt.timedelta(days=LONG_HORIZON):
             adds.append(ScheduledFlow(d, ctx.forecast.account_id, emi, "debit", "New EMI", "new_emi", "emi",
                                       "simulated", True, False, "new_emi"))
             k += 1
         return sorted(flows + adds, key=lambda f: f.sort_key())
+    return schedule
 
-    return Action("new_emi", "new_emi", f"New EMI of {format_inr(emi)} for {tenure_months} months",
-                  {"principal_paise": principal_paise, "tenure_months": tenure_months, "annual_rate_bps": rate},
-                  Modifier(new_loans=[Loan("new_emi", "New EMI", principal_paise, emi, rate, tenure_months)]),
-                  schedule, assumptions, [], auto=False,
-                  extra={"emi_paise": emi, "total_interest_paise": emi * tenure_months - principal_paise,
-                         "alt_tenure": {"tenure_months": alt_n, "emi_paise": emi_paise(principal_paise, rate, alt_n)}})
+
+def _emi_date_options(ctx: Context, action: Action) -> dict:
+    base = ctx.forecast90()
+    options = []
+    for label, first_due in action.extra["date_options"]:
+        fc = ctx.forecast90(_emi_schedule(ctx, action.extra["emi_paise"], first_due))
+        own = max([b.probability for b in fc.bounce_risks if b.merchant_key == "new_emi"] or [0.0])
+        options.append({"option": label, "first_due": first_due, "new_emi_bounce_risk": own,
+                        "max_mandate_bounce_risk": max_mandate_bounce(fc)})
+    good, default = options[0], options[1]
+    advice = None
+    if default["new_emi_bounce_risk"] - good["new_emi_bounce_risk"] >= 0.05:
+        advice = {"text": "Ask for an EMI date right after your salary date",
+                  "bounce_risk_after_payday": good["new_emi_bounce_risk"],
+                  "bounce_risk_30_days_from_today": default["new_emi_bounce_risk"]}
+    return {"options": options, "advice": advice, "bounce_risk_before_90d": max_mandate_bounce(base)}
 
 
 def what_if_delay_purchase(ctx: Context, amount_paise: int, from_date: dt.date, to_date: dt.date) -> Action:
@@ -441,6 +558,10 @@ def what_if_delay_purchase(ctx: Context, amount_paise: int, from_date: dt.date, 
 
 # ---- evaluation --------------------------------------------------------------------------------------------
 def evaluate(ctx: Context, action: Action, rank: int | None = None) -> Recommendation:
+    if action.type == "link_account":  # a data action: its impact is on what we can see, not on money
+        return Recommendation(action.key, action.type, action.title, rank, action.params,
+                              {"kind": "data", **action.extra["data_impact"]},
+                              {"label": "High", "reason": "linking only adds data"}, [], action.drivers, {})
     base_fc = ctx.forecast
     if "base_schedule_fn" in action.extra:  # delay_purchase: compare buying later with buying now
         base_fc = _rerun(ctx, action.extra["base_schedule_fn"](ctx.forecast.schedule))
@@ -453,8 +574,11 @@ def evaluate(ctx: Context, action: Action, rank: int | None = None) -> Recommend
     cut = action.modifier.consumption_cut
     annual = card_saved + loan_saved - savings_foregone + 12 * cut
     ess = max(1, ctx.inputs.essential_paise)
-    buffer_now_after = max(0, ctx.inputs.liquid_paise - action.modifier.savings_to_card_now) / ess
+    rev = ctx.inputs.revolving_paise or 0
+    moved = action.modifier.savings_to_card_now
+    buffer_now_after = max(0, ctx.inputs.liquid_paise - moved - (rev - min(moved, rev))) / ess
     impact = {
+        "kind": "simulation",
         "annual_impact_paise": annual,
         "monthly_cashflow_paise": cut + (action.params.get("old_emi_paise", 0) - action.params.get("new_emi_paise", 0)
                                          if action.type == "change_emi_tenure" else 0)
@@ -482,6 +606,7 @@ def evaluate(ctx: Context, action: Action, rank: int | None = None) -> Recommend
         "dip_saturated": ctx.saturated,
     }
     if action.type == "new_emi":
+        impact["emi_dates"] = _emi_date_options(ctx, action)
         inc = ctx.metrics.income_monthly_paise
         impact["emi_to_income_before"] = ctx.metrics.emi_to_income
         impact["emi_to_income_after"] = (ctx.metrics.emi_monthly_paise + action.extra["emi_paise"]) / inc if inc else None
@@ -492,19 +617,24 @@ def evaluate(ctx: Context, action: Action, rank: int | None = None) -> Recommend
         label = action.confidence_cap
     conf = {"label": label, "reason": ctx.confidence.reason + (
         "; capped at Medium: depends on a behavioural assumption" if label != ctx.confidence.label else "")}
-    extra = {k: v for k, v in action.extra.items() if k != "base_schedule_fn"}
+    extra = {k: v for k, v in action.extra.items() if k not in ("base_schedule_fn", "date_options")}
     return Recommendation(action.key, action.type, action.title, rank, action.params, impact, conf,
                           action.assumptions, action.drivers, extra)
 
 
-def recommend(ctx: Context, top: int = 5) -> tuple[list[Recommendation], dict | None]:
+def recommend(ctx: Context, top: int = 5) -> tuple[list[Recommendation], dict | None, list[Recommendation]]:
+    """(ranked recommendations, combined plan, what-if offers). Data actions come first (D30e)."""
     actions = [a for gen in GENERATORS for a in gen(ctx)]
-    evaluated = [evaluate(ctx, a) for a in actions]
+    data = [evaluate(ctx, a) for a in actions if a.type == "link_account"]
+    sims = [a for a in actions if a.type != "link_account"]
+    evaluated = [evaluate(ctx, a) for a in sims]
     useful = [r for r in evaluated if r.impact["score_delta_12m"] > 0 or r.impact["annual_impact_paise"] > 0
               or r.impact["bounce_risk_after"] < r.impact["bounce_risk_before"]]
     useful.sort(key=lambda r: (-r.impact["score_delta_12m"], -r.impact["annual_impact_paise"], r.action_key))
-    ranked = [dataclasses.replace(r, rank=i + 1) for i, r in enumerate(useful[:top])]
-    return ranked, combined_plan(ctx, [a for r in ranked[:3] for a in actions if a.key == r.action_key])
+    ranked = [dataclasses.replace(r, rank=i + 1) for i, r in enumerate((data + useful)[:top])]
+    top_sims = [a for r in ranked if r.type != "link_account" for a in sims if a.key == r.action_key][:3]
+    offers = [evaluate(ctx, a) for a in what_if_offers(ctx)]
+    return ranked, combined_plan(ctx, top_sims), offers
 
 
 def combined_plan(ctx: Context, actions: list[Action]) -> dict | None:

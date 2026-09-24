@@ -31,7 +31,11 @@ dependencies = [
 hisaab = "app.cli:app"
 
 [dependency-groups]
-dev = ["pytest>=8.3", "ruff>=0.6"]
+dev = [
+    "hypothesis>=6.168.1",
+    "pytest>=8.3",
+    "ruff>=0.6",
+]
 
 [build-system]
 requires = ["hatchling"]

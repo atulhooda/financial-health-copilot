@@ -21,7 +21,7 @@ def test_aa_parses_deposit_and_loan(clock):
     kinds = {a.hint.kind for a in batch.accounts}
     assert kinds == {"savings", "loan"}
     loan = next(a for a in batch.accounts if a.hint.kind == "loan")
-    assert loan.emi_paise and loan.emi_next_due == dt.date(2026, 10, 10) and loan.loan_rate_bps == 1300
+    assert loan.emi_paise and loan.emi_next_due == dt.date(2026, 9, 10) and loan.loan_rate_bps == 1300
     assert "Aarav Deshmukh" in next(a for a in batch.accounts if a.hint.kind == "savings").holder_names
     assert all(t.amount_paise > 0 for t in batch.transactions)
     assert batch.consent.purpose_code == "102"
