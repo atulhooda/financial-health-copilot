@@ -14,7 +14,8 @@ down:
 train:         ## Train the categoriser and write docs/CATEGORISER.md
 	$(UV) hisaab train-categoriser
 
-seed:          ## Personas: A at T0, B and C in full
+seed:          ## Migrations, then personas: A at T0, B and C in full
+	$(UV) alembic upgrade head
 	$(UV) hisaab seed
 
 demo:          ## Replay persona A T0 -> +3

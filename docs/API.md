@@ -22,11 +22,15 @@ Fact           { "id": "F3", "key": "income_monthly", "title": "Monthly income",
 Prediction     { "id": "P1", "key": "dip_probability", "title": "...", "value": Quantity, "confidence": Confidence, "text": "..." }
 Recommendation { "id": "R1", "action_key": "pay_down_card:acc_card1", "rank": 1, "title": "...", "text": "...",
                  "impact": Impact, "confidence": Confidence, "assumptions": [Assumption] }
-Impact     { "monthly_cashflow": Quantity, "annual_cashflow": Quantity, "lifetime_cost": Quantity|null,
-             "score_now": Quantity, "score_after": Quantity, "score_delta": Quantity,
-             "score_12m_baseline": Quantity, "score_12m_with_action": Quantity,   // projected scores: always RECOMMENDATION (D10)
-             "dip_probability_before": Quantity, "dip_probability_after": Quantity,
-             "buffer_months_after": Quantity }
+Impact     { "annual_impact": Quantity,            // interest saved - savings interest foregone + cash freed, 12 months
+             "monthly_cashflow": Quantity, "card_interest_saved_12m": Quantity, "loan_interest_saved_12m": Quantity,
+             "savings_interest_foregone_12m": Quantity, "lifetime_cost": Quantity|null,
+             "score_now": Quantity, "score_12m_baseline": Quantity, "score_12m_with_action": Quantity,
+             "score_delta_12m": Quantity,          // projected scores: always RECOMMENDATION (D10)
+             "months_to_clear_card": Quantity|null, "buffer_months_now_after": Quantity,
+             "buffer_months_12m_baseline": Quantity, "buffer_months_12m_with_action": Quantity,
+             "bounce_risk_before": Quantity, "bounce_risk_after": Quantity,   // largest NACH/ACH mandate risk (D34)
+             "dip_probability_before": Quantity, "dip_probability_after": Quantity, "dip_saturated": bool }
 Assumption { "id": "A1", "key": "consumer_emi_rate", "text": "Assumed interest rate 15% p.a.", "value": Quantity, "source": "config|statement|user" }
 ```
 

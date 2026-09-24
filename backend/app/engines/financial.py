@@ -33,6 +33,11 @@ class CardMetrics:
     revolving_paise: int | None
     outstanding_paise: int | None
     apr_bps: int | None
+    # D30/D31: per-statement history and the rate implied by the statement's own finance charges (a FACT)
+    history: list[dict] = field(default_factory=list)  # [{statement, due, balance, paid, revolving}], oldest first
+    implied_monthly_rate: float | None = None  # (finance charges + GST on them) / balance carried into the cycle
+    purchases_monthly_paise: int | None = None  # median card spend per statement cycle
+    pay_ratio: float | None = None  # median share of the statement actually paid by the due date
 
 
 @dataclass
@@ -58,6 +63,7 @@ class Metrics:
     cards: list[CardMetrics]
     credit_utilisation: float | None
     revolving_paise: int | None
+    debt_growth: dict | None  # D31 alert (a FACT): revolving grew across statements while income rose or held
     recurring: list[RecurringItem]
     overlaps: list[dict]
     spend_by_category: list[dict]
@@ -144,7 +150,63 @@ def _card(view: View, a) -> CardMetrics:
                          & (pl.col("date") > s) & (pl.col("date") <= due)
                          & pl.col("category").is_in(["transfer_self", "transfer_in_unseen"]))["amount"].sum()
         out.revolving_paise = max(0, stmt_bal - int(paid or 0))
+    _card_history(view, a, out, s, sday, dday)
     return out
+
+
+def _card_history(view: View, a, out: CardMetrics, last_due_passed: dt.date, sday: int, dday: int) -> None:
+    """Per-statement revolving, implied interest rate, purchases and pay ratio, from the card's own data."""
+    tx = view.txns.filter(pl.col("account_id") == a.account_id)
+    card_start = tx["date"].min()
+    statements, s = [], last_due_passed
+    while card_start is not None and s > card_start and len(statements) < 6:
+        statements.append(s)
+        s = add_months(s, -1, sday)
+    statements.reverse()
+    hist = []
+    for s in statements:
+        bal = _balance_on(view.txns, a.account_id, s)
+        if bal is None:
+            continue
+        due = _due_after(s, dday)
+        paid = int(tx.filter((pl.col("direction") == "credit") & (pl.col("date") > s) & (pl.col("date") <= due)
+                             & pl.col("category").is_in(["transfer_self", "transfer_in_unseen"]))["amount"].sum() or 0)
+        hist.append({"statement": s, "due": due, "balance": bal, "paid": paid, "revolving": max(0, bal - paid)})
+    out.history = hist
+    rates, buys = [], []
+    for prev, cur in zip(hist, hist[1:], strict=False):
+        cycle = tx.filter((pl.col("date") > prev["statement"]) & (pl.col("date") <= cur["statement"])
+                          & (pl.col("direction") == "debit"))
+        charges = int(cycle.filter(pl.col("category").is_in(["card_interest"]))["amount"].sum() or 0)
+        gst = int(cycle.filter((pl.col("category") == "fees_charges") & ~pl.col("is_bounce"))["amount"].sum() or 0)
+        if prev["revolving"] > 0 and charges > 0:
+            rates.append((charges + gst) / prev["revolving"])
+        buys.append(int(cycle.filter(pl.col("spend") & ~pl.col("category").is_in(["card_interest", "fees_charges"]))
+                        ["amount"].sum() or 0))
+    out.implied_monthly_rate = statistics.median(rates[-3:]) if rates else None
+    out.purchases_monthly_paise = int(statistics.median(buys[-3:])) if buys else None
+    ratios = [h["paid"] / h["balance"] for h in hist if h["balance"] > 0]
+    out.pay_ratio = statistics.median(ratios[-3:]) if ratios else None
+
+
+def _debt_growth(cards: list[CardMetrics], income_now: int, recurring: list[RecurringItem]) -> dict | None:
+    """D31: revolving grew across consecutive statements while income rose or held. A FACT, stated with amounts."""
+    for c in cards:
+        h = [x for x in c.history if x["revolving"] > 0]
+        if len(h) < 3:
+            continue
+        last = h[-3:]
+        if not (last[0]["revolving"] < last[1]["revolving"] < last[2]["revolving"]):
+            continue
+        salary = next((r for r in recurring if r.kind == "salary" and r.direction == "credit" and r.active), None)
+        income_then = (salary.amounts[0] if salary and salary.changed_at and salary.changed_at > last[0]["statement"]
+                       else income_now)
+        if income_now >= income_then:
+            return {"account_id": c.account_id, "from_statement": last[0]["statement"],
+                    "to_statement": last[-1]["statement"], "revolving_from_paise": last[0]["revolving"],
+                    "revolving_to_paise": last[-1]["revolving"], "statements": len(last),
+                    "income_then_paise": income_then, "income_now_paise": income_now}
+    return None
 
 
 # ---- engine --------------------------------------------------------------------------------------
@@ -250,6 +312,7 @@ def compute_metrics(view: View, recurring: list[RecurringItem] | None = None) ->
         liquid_paise=liquid, earmarked_loan_paise=borrowed, buffer_months=buffer, emi_monthly_paise=emi_m,
         emi_to_income=emi_m / income if income > 0 else None, debt_outstanding_paise=debt,
         debt_to_income=debt / (12 * income) if income > 0 else None, cards=cards, credit_utilisation=util,
-        revolving_paise=revolving, recurring=recurring, overlaps=overlapping_subscriptions(recurring),
+        revolving_paise=revolving, debt_growth=_debt_growth(cards, salary_level or income, recurring),
+        recurring=recurring, overlaps=overlapping_subscriptions(recurring),
         spend_by_category=by_cat, drift=drift, discretionary_ratio=disc_ratio, cycle_lows=lows, bounces=bounces,
         floor_paise=view.floor_paise, coverage=coverage, earmarks=earmarks)

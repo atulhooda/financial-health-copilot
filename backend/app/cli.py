@@ -50,65 +50,78 @@ def seed() -> None:
 
 @app.command()
 def demo() -> None:
-    """Replay persona A: T0 -> +1 -> +2 -> +3 (docs/DEMO.md). Phase 2: facts, score and new-data attribution."""
-    from app.core.clock import FixedClock, set_clock
+    """Replay persona A T0 -> +3 through the event bus and worker; print the timeline (docs/DEMO.md)."""
     from app.core.money import format_inr
-    from app.db.repo import UserRepo
-    from app.db.session import session_scope
-    from app.demo.scenario import persona_a_steps
-    from app.engines.attribution import attribute_change
-    from app.engines.backtest import forecast_with_confidence
-    from app.engines.financial import compute_metrics
-    from app.engines.score import compute_score
-    from app.engines.view import build_view
-    from app.ingest.registry import adapter_for
-    from app.ingest.service import ingest_batch, next_ingest_seq
+    from app.db.session import get_engine, make_sessionmaker
+    from app.demo.replay import replay
+    from app.events.bus import get_bus
     from app.pipeline.categorise.train import get_categoriser
 
-    cat = get_categoriser()
-    fmt = lambda p: "n/a" if p is None else format_inr(p)  # noqa: E731
-    pct = lambda x: "n/a" if x is None else f"{x * 100:.1f}%"  # noqa: E731
-    with session_scope() as s:
-        UserRepo(s, "demo-a").erase_all()
-    prev = None
-    for step in persona_a_steps():
-        clock = FixedClock(step.as_of)
-        set_clock(clock)
-        for source, payload in step.payloads:
-            with session_scope() as s:
-                ingest_batch(s, "demo-a", adapter_for(source, clock).parse(payload, "demo-a"), cat, clock)
-        with session_scope() as s:
-            seq = next_ingest_seq(UserRepo(s, "demo-a")) - 1
-            v = build_view(s, "demo-a", step.as_of, cat)
-            m = compute_metrics(v)
-            sc = compute_score(m)
-            att = attribute_change(s, "demo-a", cat, prev[0], prev[1], step.as_of, seq) if prev else None
-        fc, conf, _ = forecast_with_confidence(v, m.recurring, m.coverage)
-        accts = [a for a in v.accounts.values() if a.institution != "cash"]
-        typer.echo(f"\n[{step.name:>2}] as_of {step.as_of}  {step.label}")
-        typer.echo(f"     accounts linked {sum(a.linked for a in accts)}/{len(accts)} "
-                   f"(visible {sum(a.visible for a in accts)})   score {sc.total} {sc.band} "
-                   f"(pillar coverage {sc.score_coverage}%)")
-        typer.echo(f"     income {fmt(m.income_monthly_paise)}  spend {fmt(m.spend_monthly_paise)}  "
-                   f"savings rate {pct(m.savings_rate)}  buffer {m.buffer_months and round(m.buffer_months, 1)} mo  "
-                   f"EMI/income {pct(m.emi_to_income)}  revolving {fmt(m.revolving_paise)}")
-        typer.echo("     pillars " + "  ".join(f"{p.key}={p.contribution if p.status == 'ok' else '-'}"
-                                             for p in sc.pillars))
-        if fc.available:
-            top = next((b for b in fc.bounce_risks if b.mandate), fc.bounce_risks[0] if fc.bounce_risks else None)
-            typer.echo(f"     forecast: dip below {fmt(fc.floor_paise)} before {fc.next_income_date}: "
-                       f"{fc.dip_probability:.0%} (likely {fc.likely_dip_date}); confidence {conf.label}: {conf.reason}")
-            if fc.dip_probability_if_kept is not None:
-                typer.echo(f"     assumes {fmt(fc.earmarked_loan_paise)} of loan money goes to its purpose; "
-                           f"if you keep it, dip risk is {fc.dip_probability_if_kept:.0%}")
-            if top:
-                typer.echo(f"     bounce risk: {top.name} {fmt(top.amount_paise)} on {top.due_date}: {top.probability:.0%}")
-        if att:
-            tag = "NEW_DATA_REVEALED " if att.new_data_revealed else ""
-            typer.echo(f"     change {sc.total - att.score['prev']:+d} = behaviour/time {att.score['behaviour']:+d}"
-                       f" + new data {att.score['new_data']:+d}  {tag}")
-        prev = (step.as_of, seq)
-    typer.echo("\nSnapshots, diffs and recommendation changes arrive in Phase 4.")
+    try:
+        bus = get_bus()
+    except Exception as e:  # noqa: BLE001
+        raise typer.Exit(_fail(f"event bus unavailable ({e}); run `make up`, or EVENT_BUS=inprocess make demo")) from e
+    results = replay(make_sessionmaker(get_engine()), bus, get_categoriser())
+    for r in results:
+        _print_step(r, format_inr)
+
+
+def _fail(msg: str) -> int:
+    typer.echo(msg, err=True)
+    return 1
+
+
+def _print_step(r, fmt) -> None:
+    p = r.snapshot.payload
+    sc, fc, conf = p["score"], p["forecast"], p["confidence"]
+    accts = p["accounts"]
+    typer.echo(f"\n[{r.step.name:>2}] as_of {r.step.as_of}  {r.step.label}")
+    typer.echo(f"     snapshot {r.snapshot.snapshot_id} (seq {r.snapshot.seq}, trigger {r.snapshot.trigger}); "
+               f"accounts linked {sum(a['status'] == 'linked' for a in accts)}/{len(accts)}")
+    line = f"     score {sc['total']} {sc['band']}"
+    if r.diff:
+        d = r.diff.payload["score"]
+        line += f"  ({d['delta']:+d}: behaviour {d['behaviour']:+d}, new data {d['new_data']:+d})"
+    typer.echo(line)
+    top = next((a for a in p["alerts"] if a["kind"] == "bounce_risk"), None)
+    if top:
+        typer.echo(f"     bounce risk: {top['name']} {fmt(top['amount_paise'])} on {top['due_date']}: "
+                   f"{top['probability']:.0%}")
+    if fc["available"]:
+        sat = " (saturated: no dip reason codes, D34)" if fc["dip_saturated"] else ""
+        typer.echo(f"     dip below {fmt(fc['floor_paise'])} before {fc['next_income_date']}: "
+                   f"{fc['dip_probability']:.0%}{sat}; confidence {conf['label']}: {conf['reason']}")
+        if fc.get("dip_probability_if_kept") is not None:
+            typer.echo(f"     assumes {fmt(fc['earmarked_loan_paise'])} of loan money goes to its purpose; "
+                       f"if you keep it, dip risk is {fc['dip_probability_if_kept']:.0%}")
+    dg = p.get("debt_growth")
+    if dg:
+        typer.echo(f"     debt growing: card balance carried grew {fmt(dg['revolving_from_paise'])} -> "
+                   f"{fmt(dg['revolving_to_paise'])} over {dg['statements']} statements while income went "
+                   f"{fmt(dg['income_then_paise'])} -> {fmt(dg['income_now_paise'])}")
+    for rec in p["recommendations"][:3]:
+        i = rec["impact"]
+        typer.echo(f"     #{rec['rank']} {rec['title']}")
+        typer.echo(f"         12-month score {i['score_12m_baseline']} -> {i['score_12m_with_action']} "
+                   f"({i['score_delta_12m']:+d}); {fmt(i['annual_impact_paise'])} a year; bounce risk "
+                   f"{i['bounce_risk_before']:.0%} -> {i['bounce_risk_after']:.0%}; confidence {rec['confidence']['label']}")
+    if r.diff:
+        typer.echo(f"     reason codes: {', '.join(r.diff.reason_codes)}")
+        for c in r.diff.payload["rec_changes"]:
+            where = {"added": f"new at #{c['to_rank']}", "removed": f"removed (was #{c['from_rank']})",
+                     "rank_changed": f"#{c['from_rank']} -> #{c['to_rank']}"}[c["change"]]
+            typer.echo(f"       {where}: {c['title']}  [caused by {', '.join(c['caused_by'])}]")
+
+
+@app.command()
+def worker() -> None:
+    """Consume data.ingested events and write snapshots (the demo runs the same code in-process)."""
+    from app.db.session import get_engine, make_sessionmaker
+    from app.events.bus import get_bus
+    from app.events.worker import run_forever
+    from app.pipeline.categorise.train import get_categoriser
+
+    run_forever(get_bus(), make_sessionmaker(get_engine()), get_categoriser())
 
 
 @app.command("backtest-report")

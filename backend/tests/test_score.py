@@ -36,7 +36,8 @@ def _metrics(**kw) -> Metrics:
                 income_monthly_paise=1, salary_level_paise=1, earmarked_loan_paise=0,
                 other_income_monthly_paise=0, spend_monthly_paise=0,
                 essential_monthly_paise=1, discretionary_monthly_paise=1, emi_monthly_paise=1,
-                debt_outstanding_paise=0, cards=[], recurring=[], overlaps=[], spend_by_category=[], drift=[],
+                debt_outstanding_paise=0, cards=[], recurring=[], debt_growth=None, overlaps=[], spend_by_category=[],
+                drift=[],
                 cycle_lows=[], bounces=0, floor_paise=500000, coverage={"complete_cycles": 6})
     base.update(kw)
     return Metrics(**base)
