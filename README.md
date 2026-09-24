@@ -4,7 +4,7 @@ Hackathon prototype. Read [CLAUDE.md](CLAUDE.md) for the rules and [docs/SPEC.md
 
 ```bash
 brew install libomp            # macOS: LightGBM runtime
-make up                        # Postgres (host port 5433) + Redis, migrations
+make up                        # Postgres (host port 55432) + Redis, migrations
 make seed                      # trains the categoriser if needed, loads personas A (T0), B, C
 make demo                      # persona A replay T0 -> +3
 make test

@@ -29,8 +29,16 @@ Android SMS permission is all-or-nothing, so the phone sees the Axis card's spen
 |---|---|---|
 | **T0** | trigger `baseline`, no diff | Fair band. Card visible via SMS but not linked → credit pillar excluded (coverage 85%). 3 of 4 known accounts linked → confidence discounted. Dip risk before the Oct 1 salary > 50% (₹5,000 floor, D17). Bounce risk shown for a named debit. Recs include `cancel_overlapping_subs:ott_video`. Whether `auto_sweep` appears is the D7 rule's call. |
 | **+1** | `ACCOUNT_LINKED`, `NEW_DATA_REVEALED`, `HIGH_COST_DEBT_FOUND`, `REC_ADDED` (for `pay_down_card:*`, caused_by `HIGH_COST_DEBT_FOUND`) | Revolving ~₹40k surfaces. Spend rises slightly and savings rate falls (interest and GST become visible; purchases were already seen via SMS). Credit pillar enters at ≤ 40 → score drops, and D24 attributes the whole drop to new data ("linking your card showed…"). Confidence rises (4 of 4 linked). `pay_down_card` probably ranks #1. |
-| **+2** | `INCOME_INCREASED` | Dip risk falls (`DIP_RISK_DOWN` likely). Score rises (savings pillar). A sweep may appear or grow; that is an engine outcome of the D7 rule, not scripted. |
-| **+3** | `NEW_EMI_ADDED`, `ACCOUNT_LINKED` (no `NEW_DATA_REVEALED`: a brand-new loan is behaviour) | EMI-to-income rises. The disbursal lands in the salary account, but borrowed cash doesn't count as buffer (D29). Dip/bounce risk rises (`DIP_RISK_UP` likely; bounce risk on the new EMI on 2026-12-05). `change_emi_tenure` rank moves. The disbursal is **not** income. |
+| **+2** | `INCOME_INCREASED` | *Corrected after the Phase 3 forecast:* dip risk does **not** fall. A spends the hike (spend-down behaviour), and revolving keeps growing (amounts in `DEMO_NUMBERS.md`). That is exactly why D30/D31 matter: the debt-growth alert fires, and the hike should go to the card. |
+| **+3** | `NEW_EMI_ADDED`, `ACCOUNT_LINKED` (no `NEW_DATA_REVEALED`: a brand-new loan is behaviour) | EMI-to-income rises. The disbursal lands in the salary account, but borrowed cash doesn't count as buffer (D29), and it is earmarked out of the forecast (D33, shown as an assumption). The new EMI appears as a bounce risk on 2026-12-05. The dip *before the Dec 1 salary* can't rise further (it is already ~100%): the EMI lands after that salary. Dip/bounce risk rises (`DIP_RISK_UP` likely; bounce risk on the new EMI on 2026-12-05). `change_emi_tenure` rank moves. The disbursal is **not** income. |
+
+### Phase 4 expected story (SPEC D30–D32; not tested beyond reason codes)
+- **+1:** the top action is clearing the card, partly from savings ("use part of savings to clear the card, keep a cushion of X"). Card interest is at the rate implied by the statement's own finance charges (FACT); savings interest is an assumption.
+- **+2:** the debt-growth alert fires (FACT: revolving grew statement over statement while income rose). The recommendation redirects the salary hike, and the existing ₹8,000 savings sweep, to the card instead of recommending a bigger savings sweep.
+- **+3:** the new EMI raises dip and bounce risk (bounce risk on the Dec 5 EMI) and pauses any sweep increase.
+
+### Demo beat: Uncategorised → correction → rule (Phase 3 review, point 7)
+Persona A pays a home-tiffin service, **GHARGUTI DABBA**, ₹1,800 on the 3rd of each month on the Axis card. The ML fallback can't place the name (confidence < 0.9), so it shows as **Uncategorised**, which counts as essential. In the app, the user taps it and picks "Dining". `POST /v1/merchant-rules` creates a per-user rule: every past and future Gharguti Dabba transaction becomes `dining` with `category_source: user`, and the next snapshot reflects it. We do not calibrate the categoriser for the demo; the correction flow is the point.
 
 ## 4. Golden question (after +3)
 `Kya main ₹60,000 ka phone 12 months ki EMI pe le sakta hoon?`
@@ -51,6 +59,7 @@ Android SMS permission is all-or-nothing, so the phone sees the Axis card's spen
 | 2026-09-24 | Persona A `card_sms` (new, True) | Card spend SMS rendered for every card purchase | The D19 decision above. |
 | 2026-09-24 | Persona A `sweep_to_savings`, `spend_down_threshold`, `card_pay_ratio` | 4,000 → 8,000; 16,000 → 20,000; 0.32 → 0.30 | Engine run at T0 gave 45 (Poor): savings rate −2.8%, 0 of 5 clean cycles. The first two changes make A a "save first, run short later" user (T0: 63 Fair, 2 of 5 clean cycles, latest cycle low ≈ ₹0). The third restores revolving to ₹38.7k at +1 (engine-level), inside the band. |
 | 2026-09-24 | Persona C `annual_prime`, `netflix_monthly` (new) | Annual Prime (₹1,499, May) + Netflix monthly on card | Exercises annual-plan detection and an overlap with an annual member (D23). |
+| 2026-09-24 | Persona A `tiffin` (new) | ₹1,800 on the 3rd, on the Axis card | The Uncategorised demo beat. It sits on the card so it only reaches cash through the 30% card payment: on the salary account it pushed A's T0 balance below the floor (₹4,302), turning the dip "forecast" into a fact dated today. On the card, T0 opens at ₹5,209 and revolving at +1 is ₹42.4k (in band). |
 | 2026-09-23 | Persona A card statement before history | Added the March statement's payment (due 2026-04-07) | The first in-window payment was missing, which understated early card payments. |
 
 ## 6. Judge Q&A crib

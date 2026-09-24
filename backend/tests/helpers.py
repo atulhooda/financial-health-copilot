@@ -20,7 +20,10 @@ def make_view(rows: list[dict], as_of: dt.date, accounts: dict[str, AccountView]
                      "merchant_name": r.get("merchant_name", r["merchant_key"]),
                      "counterparty_type": r.get("counterparty_type", "merchant"), "channel": r.get("channel", "upi"),
                      "is_bounce": False, "balance_after": r.get("balance_after"),
-                     "account_kind": r.get("account_kind", "savings"), **flags[cat]})
+                     "account_kind": r.get("account_kind", "savings"), "transfer_group_id": r.get("transfer_group_id"),
+                     "counter_account_id": r.get("counter_account_id"), "is_card_payment": r.get("is_card_payment", False),
+                     "card_account_id": r.get("card_account_id"),
+                     **flags[cat]})
     txns = pl.DataFrame(recs, schema=TXN_SCHEMA).sort(["date", "account_id", "seq"])
     accounts = accounts or {"acc_sal": AccountView("acc_sal", "savings", "hdfc", "4321", True, rows[0]["date"],
                                                    role="operating")}

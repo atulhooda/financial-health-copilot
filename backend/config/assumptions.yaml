@@ -6,3 +6,4 @@ gst_on_finance_charges_bps: 1800
 unswept_spend_share: 0.5           # SPEC D7
 sweep_step_paise: 50000            # ₹500 steps
 sweep_max_dip_increase_pp: 2       # SPEC D7
+savings_interest_bps: 300          # D30: savings account interest, an ASSUMPTION (card interest comes from the statement)

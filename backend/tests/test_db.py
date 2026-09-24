@@ -46,7 +46,7 @@ def test_erasure_leaves_nothing_for_the_user(session, clock, categoriser):
     assert session.scalar(select(func.count()).select_from(Transaction).where(Transaction.user_id == "demo-a")) > 0
 
 
-PG_URL = os.environ.get("TEST_POSTGRES_URL", "postgresql+psycopg://hisaab:hisaab@localhost:5433/hisaab_test")
+PG_URL = os.environ.get("TEST_POSTGRES_URL", "postgresql+psycopg://hisaab:hisaab@localhost:55432/hisaab_test")
 
 
 @pytest.mark.postgres

@@ -29,6 +29,8 @@ TXN_SCHEMA = {
     "direction": pl.Utf8, "category": pl.Utf8, "category_source": pl.Utf8, "confidence": pl.Float64,
     "merchant_key": pl.Utf8, "merchant_name": pl.Utf8, "counterparty_type": pl.Utf8, "channel": pl.Utf8,
     "is_bounce": pl.Boolean, "balance_after": pl.Int64, "account_kind": pl.Utf8,
+    "transfer_group_id": pl.Utf8, "counter_account_id": pl.Utf8, "is_card_payment": pl.Boolean,
+    "card_account_id": pl.Utf8,
     "spend": pl.Boolean, "essential": pl.Boolean, "discretionary": pl.Boolean, "income": pl.Boolean,
 }
 
@@ -42,6 +44,7 @@ class AccountView:
     linked: bool  # AA/statement data (a state) by the cutoff
     visible_from: dt.date | None  # first transaction we hold, any source (D19)
     state: dict = field(default_factory=dict)
+    state_as_of: dt.date | None = None
     role: str | None = None  # operating | reserve | liability
     balance_paise: int | None = None  # at as_of
 
@@ -122,16 +125,27 @@ def build_view(session: Session, user_id: str, as_of: dt.date, categoriser: Cate
     res = run_pipeline(user_id, raws, paccs, categoriser, holders, existing, rules)
 
     flags = category_flags()
+    legs: dict[str, list[str]] = {}
+    for t in res.txns:
+        if t.transfer_group_id:
+            legs.setdefault(t.transfer_group_id, []).append(t.account.account_id)
+    cards = {(a.last4): a.account_id for a in [*paccs, *res.inferred_accounts] if a.kind == "credit_card"}
     records = []
     for t in res.txns:
         f = flags.get(t.category, flags["other"])
+        is_card_payment = t.direction == "debit" and t.account.kind in DEPOSIT and "card_bill" in t.signatures
+        other = [a for a in legs.get(t.transfer_group_id or "", []) if a != t.account.account_id]
         records.append({
             "txn_id": t.txn_id, "account_id": t.account.account_id, "date": t.date, "seq": t.raw.seq,
             "amount": t.amount, "direction": t.direction, "category": t.category,
             "category_source": t.category_source, "confidence": float(t.category_confidence),
             "merchant_key": t.merchant_key, "merchant_name": t.merchant_name,
             "counterparty_type": t.counterparty_type, "channel": t.channel, "is_bounce": t.is_bounce,
-            "balance_after": t.raw.balance_after_paise, "account_kind": t.account.kind, **f})
+            "balance_after": t.raw.balance_after_paise, "account_kind": t.account.kind,
+            "transfer_group_id": t.transfer_group_id, "counter_account_id": other[0] if other else None,
+            "is_card_payment": is_card_payment,
+            "card_account_id": cards.get(t.last4_ref) if is_card_payment else None,
+            **f})
     txns = pl.DataFrame(records, schema=TXN_SCHEMA).sort(["date", "account_id", "seq", "txn_id"])
 
     # ---- account views -----------------------------------------------------------------------
@@ -141,7 +155,8 @@ def build_view(session: Session, user_id: str, as_of: dt.date, categoriser: Cate
         st = latest_state.get(a.account_id)
         accounts[a.account_id] = AccountView(a.account_id, a.kind, a.institution, a.last4, linked=st is not None,
                                              visible_from=first_seen.get(a.account_id),
-                                             state=dict(st.fields) if st else {})
+                                             state=dict(st.fields) if st else {},
+                                             state_as_of=st.as_of_date if st else None)
     for av in accounts.values():
         rows = txns.filter((pl.col("account_id") == av.account_id) & pl.col("balance_after").is_not_null())
         if rows.height:
@@ -155,7 +170,7 @@ def build_view(session: Session, user_id: str, as_of: dt.date, categoriser: Cate
 
 
 def _assign_roles(accounts: dict[str, AccountView], txns: pl.DataFrame, as_of: dt.date) -> None:
-    """Operating = the visible deposit account carrying the most spend debits in 90 days (D6)."""
+    """Operating = the account receiving the primary salary; without salary, the most spend debits (D6)."""
     recent = txns.filter(pl.col("date") > as_of - dt.timedelta(days=90))
     best, best_key = None, None
     for a in accounts.values():
@@ -165,8 +180,8 @@ def _assign_roles(accounts: dict[str, AccountView], txns: pl.DataFrame, as_of: d
         if a.institution == "cash" or not a.visible:
             continue
         mine = recent.filter(pl.col("account_id") == a.account_id)
-        key = (mine.filter((pl.col("direction") == "debit") & pl.col("spend")).height,
-               mine.filter(pl.col("category") == "income_salary").height, a.account_id)
+        salary = int(mine.filter(pl.col("category") == "income_salary")["amount"].sum() or 0)
+        key = (salary, mine.filter((pl.col("direction") == "debit") & pl.col("spend")).height, a.account_id)
         if best_key is None or key > best_key:
             best, best_key = a, key
     for a in accounts.values():

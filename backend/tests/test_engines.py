@@ -52,8 +52,12 @@ def test_engines_never_import_the_generator():
 
 # ---- D22 point-in-time -------------------------------------------------------------------------
 def _snapshot(v, m, s) -> tuple:
+    from app.engines.backtest import forecast_with_confidence
+
+    fc, conf, bt = forecast_with_confidence(v, m.recurring, m.coverage)
     return (v.txns.to_dicts(), {k: dataclasses.asdict(a) for k, a in v.accounts.items()},
-            dataclasses.asdict(m), dataclasses.asdict(s))
+            dataclasses.asdict(m), dataclasses.asdict(s), dataclasses.asdict(fc), dataclasses.asdict(conf),
+            dataclasses.asdict(bt))
 
 
 @pytest.mark.parametrize("late_clock", [WORLD_END, T0], ids=["received-later", "backfilled-early"])

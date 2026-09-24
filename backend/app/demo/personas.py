@@ -67,6 +67,10 @@ class PersonaA:
     # spend SMS from day one. The card is therefore VISIBLE at T0 (sms_only); linking at +1 reveals the
     # statement: revolving balance, interest/GST, limit and utilisation, not the purchases.
     card_sms: bool = True
+    # Demo beat (DEMO.md): a home-tiffin service the ML can't place -> Uncategorised -> user correction -> rule.
+    # Paid monthly on the Axis card (seen via card SMS at T0). Fixed day and amount: draws nothing from the
+    # persona's random stream.
+    tiffin: tuple = ("GHARGUTI DABBA", 1_800, 3)
     # "Spend what's in the account": on weekends, spend this share of the operating balance above
     # (obligations due in the next 14 days + threshold). Models the behaviour D7's sweep assumption names.
     spend_down_share: float = 0.6
@@ -223,6 +227,11 @@ def build_persona_a(p: PersonaA | None = None) -> World:
         for payee, vpa, rupees, dom in p.ott:
             if day.day == dom:
                 upi_debit(day, "sal", payee, vpa, rupees * 100, "AutoPay", sms_ok=False)
+        if p.tiffin and day.day == p.tiffin[2]:
+            amount = p.tiffin[1] * 100
+            avl = w.accounts["card"].summary["creditLimit_paise"] - w.balance["card"] - amount
+            sms = sms_text("axis", "card_spend", "9012", amount, day, p.tiffin[0], None, avl) if p.card_sms else None
+            w.debit("card", day, amount, f"{p.tiffin[0]} PUNE", "CARD", sms=sms)
         if day.day == 15:
             upi_debit(day, "sal", "MSEDCL", "mahadiscom@sbi", _amount(rng, 1850, 0.2), "Electricity")
         if day.day == 20:

@@ -96,3 +96,20 @@ def test_contract_schedule_wins_and_is_known_immediately():
 
 def test_amount_level_rejects_noise():
     assert amount_level([100, 180, 90, 240]) is None
+
+
+def test_two_random_charges_are_not_a_series():
+    rows = [{"date": dt.date(2026, 4, 5), "amount": 5196_00, "category": "shopping", "merchant_key": "croma"},
+            {"date": dt.date(2026, 7, 5), "amount": 3298_00, "category": "shopping", "merchant_key": "croma"}]
+    assert not detect_recurring(make_view(rows, AS_OF))
+
+
+def test_two_identical_obligations_are_enough_for_short_histories():
+    rows = [{"date": d, "amount": 24000_00, "category": "rent", "merchant_key": "p2p:contact_01",
+             "counterparty_type": "person"} for d in (dt.date(2026, 4, 5), dt.date(2026, 5, 5))]
+    assert _only(detect_recurring(make_view(rows, dt.date(2026, 6, 4))), "p2p:contact_01").next_due == dt.date(2026, 6, 5)
+    rows[1]["amount"] = 23000_00  # not identical: wait for a third occurrence
+    assert not detect_recurring(make_view(rows, dt.date(2026, 6, 4)))
+    shop = [{"date": d, "amount": 999_00, "category": "shopping", "merchant_key": "decathlon"}
+            for d in (dt.date(2026, 4, 5), dt.date(2026, 5, 5))]
+    assert not detect_recurring(make_view(shop, dt.date(2026, 6, 4)))  # discretionary kinds need 3

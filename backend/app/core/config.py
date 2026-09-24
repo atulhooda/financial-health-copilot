@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=(BACKEND_DIR / ".env",), extra="ignore")
 
-    database_url: str = "postgresql+psycopg://hisaab:hisaab@localhost:5433/hisaab"
+    database_url: str = "postgresql+psycopg://hisaab:hisaab@localhost:55432/hisaab"
     redis_url: str = "redis://localhost:6379/0"
     event_bus: str = "redis"  # redis | inprocess
     llm_provider: str = "none"  # anthropic | openai_compat | none

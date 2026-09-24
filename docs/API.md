@@ -53,7 +53,7 @@ Facts: score, band and pillar contributions. Predictions: dip probability (if > 
 All items are facts.
 
 ### GET `/v1/forecast`
-`data`: `{ horizon_days: 45, floor: Quantity, next_income_date, series: [{ date, p10, p50, p90 }] /* paise ints */, dip_probability: Quantity, likely_dip_date: date|null, projected_low: Quantity, bounce_risks: [{ name, kind, due_date, amount: Quantity, probability: Quantity }], confidence: Confidence, backtest: { origins, band_hit_rate: Quantity } }`
+`data`: `{ horizon_days: 45, floor: Quantity, account: { account_id, institution, masked }, opening: Quantity, next_income_date, income_basis: "salary|irregular", series: [{ date, p10, p50, p90 }] /* paise ints, end of day, may be negative = shortfall */, dip_probability: Quantity, likely_dip_date: date|null, projected_low: Quantity, pre_income: { p10, p50, p90 }, bounce_risks: [{ name, kind, mandate: bool, due_date, amount: Quantity, probability: Quantity }], scheduled: [{ date, name, kind, direction, amount: Quantity, source: "detected|contract|card_statement|card_pattern", estimated: bool }], assumptions: [Assumption] /* e.g. earmarked loan cash, D33 */, confidence: Confidence, backtest: { origins, days, coverage_p10_p90: Quantity /* the number we quote */, dip_brier, mean_predicted_dip: Quantity, observed_dip_rate: Quantity } }`
 All items are predictions, except floor, horizon and scheduled debit amounts/dates (facts). `floor` follows SPEC D17.
 
 ### GET `/v1/recommendations`

@@ -13,13 +13,17 @@ from app.core.dates import add_months, roll_back_weekend
 from app.core.ids import stable_id
 from app.engines.view import View
 
-EXCLUDED = {"transfer_self", "transfer_in_unseen", "transfer_unseen", "loan_repayment_in", "loan_disbursal_out",
-            "card_bill_unlinked", "refund", "loan_disbursal", "cash_withdrawal", "fees_charges", "card_interest",
-            "uncategorised"}
+# Not recurring obligations or income. transfer_self is handled separately: a regular move from the operating
+# account to another deposit account is a SWEEP (kind "sweep", D30); card payments get their own schedule.
+EXCLUDED = {"transfer_self", "transfer_in_unseen", "loan_repayment_in", "loan_disbursal_out", "card_bill_unlinked",
+            "refund", "loan_disbursal", "cash_withdrawal", "fees_charges", "card_interest"}
 CADENCE_DAYS = {"weekly": 7, "monthly": 30, "quarterly": 91, "annual": 365}
 KIND = {"income_salary": "salary", "income_gig": "income", "income_other": "income", "emi": "emi",
         "sip_investment": "sip", "rent": "rent", "ott_subscription": "subscription", "utilities": "bill",
-        "telecom": "bill", "insurance": "bill", "education": "fees"}
+        "telecom": "bill", "insurance": "bill", "education": "fees", "transfer_unseen": "transfer"}
+MANDATE_KINDS = {"emi", "sip"}  # NACH/ACH mandates: a shortfall is a bounce with a return charge
+# Contractual-type kinds: two identical (±1%) monthly charges are enough evidence (short histories, new users).
+EXACT_TWO_KINDS = {"salary", "emi", "sip", "rent", "subscription", "fees", "sweep"}
 VARIABLE_BILL_KINDS = {"bill"}
 
 
@@ -44,6 +48,8 @@ class RecurringItem:
     changed_at: dt.date | None = None
     subscription_group: str | None = None
     account_id: str | None = None
+    counter_account_id: str | None = None  # sweeps: the own account receiving the money
+    amounts: list[int] = field(default_factory=list)  # observed amounts, for the forecast's amount spread
 
     @property
     def cadence_days(self) -> int:
@@ -73,9 +79,10 @@ def _within(xs: list[int], tol: float) -> bool:
 
 
 def amount_level(amounts: list[int], variable_ok: bool = False) -> dict | None:
-    """D23: stable, or one change-point (both segments within 5%); the new level needs >= 2 occurrences."""
+    """D23: stable, or one change-point (both segments within 5%). The old level needs >= 2 occurrences;
+    the new level needs >= 2 to be adopted, otherwise it is a pending change."""
     n = len(amounts)
-    for i in range(n - 1, 0, -1):  # latest change-point first
+    for i in range(n - 1, 1, -1):  # latest change-point first; the old segment has >= 2 values
         a, b = amounts[:i], amounts[i:]
         if _within(a, 0.05) and _within(b, 0.05):
             ma, mb = statistics.median(a), statistics.median(b)
@@ -116,17 +123,24 @@ def next_due(cadence: str, dates: list[dt.date], kind: str) -> dt.date:
 def detect_recurring(view: View) -> list[RecurringItem]:
     merchants = load_yaml("merchants")["merchants"]
     subs = load_yaml("subscriptions")
-    tx = view.txns.filter(~pl.col("category").is_in(list(EXCLUDED)) & (pl.col("account_kind") != "loan")
+    deposit_ids = [a.account_id for a in view.accounts.values() if a.kind in ("savings", "current")]
+    sweeps = ((pl.col("category") == "transfer_self") & (pl.col("direction") == "debit")
+              & pl.col("account_id").is_in(deposit_ids) & pl.col("counter_account_id").is_in(deposit_ids)
+              & ~pl.col("is_card_payment"))
+    tx = view.txns.filter((~pl.col("category").is_in(list(EXCLUDED)) | sweeps) & (pl.col("account_kind") != "loan")
                           & ~((pl.col("account_kind") == "credit_card") & (pl.col("direction") == "credit"))
-                          & (pl.col("merchant_key") != "atm"))
+                          & (pl.col("merchant_key") != "atm") & ~pl.col("is_card_payment"))
     items: list[RecurringItem] = []
     for (mkey, direction), g in sorted(tx.group_by(["merchant_key", "direction"]), key=lambda kv: kv[0]):
         g = g.sort(["date", "seq"])
         dates, amounts = g["date"].to_list(), g["amount"].to_list()
         category = Counter(g["category"].to_list()).most_common(1)[0][0]
-        kind = KIND.get(category, "other")
+        kind = "sweep" if category == "transfer_self" else KIND.get(category, "other")
         group = merchants.get(mkey, {}).get("subscription_group")
         cadence = _cadence(dates)
+        if (cadence is None and len(dates) == 2 and kind in EXACT_TWO_KINDS and 24 <= (dates[1] - dates[0]).days <= 38
+                and abs(amounts[1] - amounts[0]) <= 0.01 * amounts[0]):
+            cadence = "monthly"
         level = amount_level(amounts, variable_ok=kind in VARIABLE_BILL_KINDS) if cadence else None
         if cadence and level:
             changed = level["changed_index"]
@@ -137,7 +151,10 @@ def detect_recurring(view: View) -> list[RecurringItem]:
                 last_date=dates[-1], active=(view.as_of - dates[-1]).days <= 1.5 * CADENCE_DAYS[cadence],
                 occurrences=len(dates), dates=dates, amount_variable=bool(level.get("variable")),
                 pending_change=level["pending"], changed_at=dates[changed] if changed is not None else None,
-                subscription_group=group, account_id=Counter(g["account_id"].to_list()).most_common(1)[0][0])
+                subscription_group=group, account_id=Counter(g["account_id"].to_list()).most_common(1)[0][0],
+                counter_account_id=Counter([c for c in g["counter_account_id"].to_list() if c]).most_common(1)[0][0]
+                if kind == "sweep" and any(g["counter_account_id"].to_list()) else None,
+                amounts=amounts)
             items.append(item)
             continue
         # Annual plans: a single charge that matches a known annual price (D23)
