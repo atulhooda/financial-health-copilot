@@ -18,6 +18,7 @@ from app.db.models import (
     Transaction,
     TransactionSource,
     User,
+    UserPreference,
 )
 from app.db.repo import UserRepo
 from app.ingest.base import AccountHint, AccountInfo, IngestBatch
@@ -226,3 +227,22 @@ def set_merchant_rule(session: Session, user_id: str, merchant_key: str, categor
         row.category, row.created_at = category, clock.now()
     session.flush()
     recompute_user(session, user_id, categoriser)
+
+
+def set_loan_cash_use(session: Session, user_id: str, txn_id: str, use: str, clock: Clock | None = None) -> None:
+    """D33: the user says what the loan money is for. "reserve" lifts the earmark in the buffer and the forecast;
+    "purpose" restores it. Stored as a point-in-time preference (views only see it from its creation time)."""
+    from app.engines.earmark import pref_key
+
+    if use not in ("reserve", "purpose"):
+        raise ValueError("use must be 'reserve' or 'purpose'")
+    clock = clock or get_clock()
+    repo = UserRepo(session, user_id)
+    if not repo.select(Transaction, Transaction.txn_id == txn_id, Transaction.category == "loan_disbursal"):
+        raise ValueError(f"{txn_id} is not a loan disbursal")
+    row = repo.get(UserPreference, key=pref_key(txn_id))
+    if row is None:
+        repo.add(UserPreference(user_id=user_id, key=pref_key(txn_id), value={"use": use}, created_at=clock.now()))
+    else:
+        row.value, row.created_at = {"use": use}, clock.now()
+    session.flush()

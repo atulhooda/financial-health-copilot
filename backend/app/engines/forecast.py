@@ -19,6 +19,7 @@ import numpy as np
 import polars as pl
 
 from app.core.seeding import rng_for
+from app.engines.earmark import earmarked_by_account
 from app.engines.recurring import RecurringItem
 from app.engines.schedule import ScheduledFlow, build_schedule
 from app.engines.view import View
@@ -28,7 +29,6 @@ N_PATHS = 1000
 POOL_DAYS = 180
 MIN_STRATUM = 4
 IRREGULAR_INCOME_WINDOW = 30
-EARMARK_WINDOW_DAYS = 30  # D33: unspent loan money this recent is assumed committed to the loan's purpose
 POOL_EXCLUDED = {"transfer_self", "transfer_in_unseen", "loan_disbursal", "loan_repayment_in", "loan_disbursal_out"}
 
 
@@ -38,11 +38,16 @@ def dom_bucket(d: dt.date) -> int:
 
 @dataclass
 class Pool:
-    """Historical daily net discretionary flows for one account."""
+    """Historical daily discretionary flows for one account (credits and debits kept apart for diagnostics)."""
 
     account_id: str
     days: list[dt.date]
-    values: np.ndarray  # paise, net per day (credits positive)
+    credits: np.ndarray  # paise per day
+    debits: np.ndarray  # paise per day, positive
+
+    @property
+    def values(self) -> np.ndarray:  # net per day (credits positive)
+        return self.credits - self.debits
 
     def candidates(self, day: dt.date) -> np.ndarray:
         key = (day.weekday(), dom_bucket(day))
@@ -51,7 +56,7 @@ class Pool:
             idx = [i for i, d in enumerate(self.days) if d.weekday() == day.weekday()]
         if len(idx) < MIN_STRATUM:
             idx = list(range(len(self.days)))
-        return self.values[idx]
+        return np.asarray(idx)
 
 
 def build_pool(view: View, account_id: str, recurring: list[RecurringItem]) -> Pool | None:
@@ -67,11 +72,11 @@ def build_pool(view: View, account_id: str, recurring: list[RecurringItem]) -> P
     n = (view.as_of - start).days + 1
     if n < 28:
         return None
-    net = np.zeros(n, dtype=np.int64)
+    credits, debits = np.zeros(n, dtype=np.int64), np.zeros(n, dtype=np.int64)
     for r in rows:
         if r["date"] >= start:
-            net[(r["date"] - start).days] += r["amount"] if r["direction"] == "credit" else -r["amount"]
-    return Pool(account_id, [start + dt.timedelta(days=i) for i in range(n)], net)
+            (credits if r["direction"] == "credit" else debits)[(r["date"] - start).days] += r["amount"]
+    return Pool(account_id, [start + dt.timedelta(days=i) for i in range(n)], credits, debits)
 
 
 @dataclass
@@ -81,6 +86,8 @@ class AccountPaths:
     opening_paise: int
     paths: np.ndarray  # (n_paths, horizon) end-of-day balances
     bounce: dict[int, float]  # index in schedule -> probability of shortfall
+    mean_credits: np.ndarray | None = None  # per day, mean over paths (scheduled + discretionary): diagnostics
+    mean_debits: np.ndarray | None = None
 
 
 def simulate_account(view: View, account_id: str, opening: int, schedule: list[ScheduledFlow], pool: Pool | None,
@@ -88,11 +95,13 @@ def simulate_account(view: View, account_id: str, opening: int, schedule: list[S
     rng = rng_for(view.user_id, "forecast", account_id, *seed_parts)
     dates = [view.as_of + dt.timedelta(days=i + 1) for i in range(horizon)]
     # Draw all discretionary flows first, in a fixed order, independent of the schedule (CRN).
-    disc = np.zeros((n_paths, horizon), dtype=np.int64)
+    disc_c = np.zeros((n_paths, horizon), dtype=np.int64)
+    disc_d = np.zeros((n_paths, horizon), dtype=np.int64)
     if pool is not None:
         for i, d in enumerate(dates):
             cands = pool.candidates(d)
-            disc[:, i] = cands[rng.integers(0, len(cands), size=n_paths)]
+            pick = cands[rng.integers(0, len(cands), size=n_paths)]
+            disc_c[:, i], disc_d[:, i] = pool.credits[pick], pool.debits[pick]
     mine = [(k, f) for k, f in enumerate(schedule) if f.account_id == account_id]
     by_day: dict[dt.date, list[tuple[int, ScheduledFlow]]] = {}
     for k, f in mine:
@@ -100,6 +109,8 @@ def simulate_account(view: View, account_id: str, opening: int, schedule: list[S
     bal = np.full(n_paths, opening, dtype=np.int64)
     paths = np.zeros((n_paths, horizon), dtype=np.int64)
     bounce: dict[int, float] = {}
+    sched_c = np.zeros(horizon)
+    sched_d = np.zeros(horizon)
 
     def amounts(f: ScheduledFlow) -> np.ndarray | int:
         """Estimated amounts vary per path, resampled from the item's own history. Each flow has its own
@@ -114,15 +125,19 @@ def simulate_account(view: View, account_id: str, opening: int, schedule: list[S
         todays = sorted(by_day.get(d, []), key=lambda kf: kf[1].sort_key())
         for _k, f in todays:
             if f.direction == "credit":
-                bal = bal + amounts(f)
+                amt = amounts(f)
+                sched_c[i] += float(np.mean(amt))
+                bal = bal + amt
         for k, f in todays:
             if f.direction == "debit":
                 amt = amounts(f)
                 bounce[k] = float(np.mean(bal < amt))
+                sched_d[i] += float(np.mean(amt))
                 bal = bal - amt
-        bal = bal + disc[:, i]
+        bal = bal + disc_c[:, i] - disc_d[:, i]
         paths[:, i] = bal
-    return AccountPaths(account_id, dates, opening, paths, bounce)
+    return AccountPaths(account_id, dates, opening, paths, bounce,
+                        sched_c + disc_c.mean(axis=0), sched_d + disc_d.mean(axis=0))
 
 
 @dataclass
@@ -160,6 +175,7 @@ class Forecast:
     available: bool = True
     reason: str | None = None
     earmarked_loan_paise: int = 0  # D33: excluded from the opening balance, returned as an assumption
+    dip_probability_if_kept: float | None = None  # D33 alternative: the same forecast if the loan cash is kept
     assumptions: list[dict] = field(default_factory=list)
 
 
@@ -174,25 +190,6 @@ def next_income_date(view: View, recurring: list[RecurringItem]) -> tuple[dt.dat
             d = view.as_of + dt.timedelta(days=1)
         return d, "salary"
     return view.as_of + dt.timedelta(days=IRREGULAR_INCOME_WINDOW), "irregular"
-
-
-def earmarked_loan_cash(view: View, account_id: str) -> int:
-    """D33: loan money disbursed in the last 30 days that is still sitting in the account.
-
-    Per disbursal: min(amount, max(0, current balance - balance just before the disbursal)). Borrowed cash is
-    assumed committed to the loan's purpose, so it doesn't make the forecast look safe (cf. D29 for the buffer)."""
-    acc = view.accounts[account_id]
-    if acc.balance_paise is None:
-        return 0
-    tx = view.txns.filter(pl.col("account_id") == account_id)
-    total = 0
-    for r in tx.filter((pl.col("category") == "loan_disbursal") & (pl.col("direction") == "credit")
-                       & (pl.col("date") > view.as_of - dt.timedelta(days=EARMARK_WINDOW_DAYS))).iter_rows(named=True):
-        if r["balance_after"] is None:
-            continue
-        before = r["balance_after"] - r["amount"]
-        total += min(r["amount"], max(0, acc.balance_paise - before))
-    return min(total, max(0, acc.balance_paise))
 
 
 def _pct(paths: np.ndarray, q: float) -> list[int]:
@@ -216,16 +213,17 @@ def run_forecast(view: View, recurring: list[RecurringItem], schedule: list[Sche
     accounts = [op.account_id] + sorted({f.account_id for f in schedule if f.direction == "debit"} - {op.account_id})
     pools = pools if pools is not None else {a: build_pool(view, a, recurring) for a in accounts}
     sims: dict[str, AccountPaths] = {}
+    earmarks = earmarked_by_account(view)
     for a in accounts:
         opening = view.accounts[a].balance_paise
         if opening is None:
             continue
-        earmarked = earmarked_loan_cash(view, a)
+        earmarked = min(earmarks.get(a, 0), max(0, opening))
         if earmarked:
             fc.earmarked_loan_paise += earmarked
             fc.assumptions.append({"key": "loan_cash_earmarked", "account_id": a, "amount_paise": earmarked,
-                                   "text": "Recent loan money still in the account is assumed committed to the "
-                                           "loan's purpose and is left out of the forecast."})
+                                   "text": "Assumes the recent loan money goes to its purpose, so it is left out of "
+                                           "the forecast. If you keep it, see the alternative."})
         sims[a] = simulate_account(view, a, opening - earmarked, schedule, pools.get(a), horizon, n_paths, seed_parts)
 
     paths = sims[op.account_id].paths
@@ -256,4 +254,19 @@ def run_forecast(view: View, recurring: list[RecurringItem], schedule: list[Sche
                 fc.bounce_risks.append(BounceRisk(f.name, f.merchant_key, f.kind, a, f.date, f.amount_paise,
                                                   sim.bounce[k], f.mandate))
     fc.bounce_risks.sort(key=lambda b: (-b.probability, b.due_date, b.name))
+
+    # D33: the alternative next to the assumption: the same forecast (same draws) if the loan cash is kept
+    if earmarks.get(op.account_id):
+        kept = simulate_account(view, op.account_id, op.balance_paise, schedule, pools.get(op.account_id), horizon,
+                                n_paths, seed_parts)
+        fc.dip_probability_if_kept = _dip(kept.paths, op.balance_paise, window, view.floor_paise)
+        for a in fc.assumptions:
+            if a["key"] == "loan_cash_earmarked" and a["account_id"] == op.account_id:
+                a["alternative"] = {"dip_probability_if_kept": fc.dip_probability_if_kept}
     return fc, sims
+
+
+def _dip(paths: np.ndarray, opening: int, window: list[int], floor: int) -> float:
+    start = np.full((paths.shape[0], 1), opening, dtype=np.int64)
+    win = np.hstack([start, paths[:, window]]) if window else start
+    return float((win < floor).any(axis=1).mean())

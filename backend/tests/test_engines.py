@@ -123,7 +123,7 @@ def test_salary_hike_and_new_loan(session, categoriser):
     assert m3.income_monthly_paise == m2.income_monthly_paise  # the disbursal is not income
     assert m3.liquid_paise > m2.liquid_paise + 1_90_000_00  # the cash landed...
     # ...but isn't a buffer (D29)
-    assert m3.borrowed_liquid_paise >= 1_90_000_00 and abs(m3.buffer_months - m2.buffer_months) < 0.05
+    assert m3.earmarked_loan_paise >= 1_90_000_00 and abs(m3.buffer_months - m2.buffer_months) < 0.05
 
 
 def _seq_after_step(session, step_index: int) -> int:

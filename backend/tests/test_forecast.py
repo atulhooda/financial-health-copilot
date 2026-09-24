@@ -2,7 +2,6 @@
 import dataclasses
 import datetime as dt
 
-import numpy as np
 import pytest
 
 from app.core.clock import FixedClock
@@ -113,11 +112,13 @@ def test_backtest_and_confidence(session, categoriser, a_t0):
     bt = run_backtest(v)
     assert len(bt.origins) >= 6 and 0 <= bt.coverage <= 1 and bt.days > 150
     conf = confidence(v, m.coverage, bt)
-    expected = np.floor(100 * min(1, bt.coverage / 0.8) * min(1, m.coverage["months_of_history"] / 6)
-                        * (m.coverage["accounts_linked"] / m.coverage["accounts_known"]) + 0.5)
-    assert conf.pct == expected and conf.coverage == bt.coverage
-    assert conf.label == ("High" if conf.pct >= 75 else "Medium" if conf.pct >= 50 else "Low")
-    assert conf.linkage_factor == 0.75  # card known but not linked at T0
+    assert conf.coverage == bt.coverage  # the only % is the measured coverage itself
+    uncapped = "High" if bt.coverage >= 0.75 else "Medium" if bt.coverage >= 0.60 else "Low"
+    # at T0 the card is known but not linked: the label can be at most Medium
+    assert conf.label == ("Medium" if uncapped == "High" else uncapped)
+    assert conf.reason.startswith(f"band held on {bt.coverage:.0%} of past days, target 80%")
+    if uncapped == "High":
+        assert conf.caps == ["1 account not linked"] and "capped at Medium" in conf.reason
     fc, conf2, bt2 = forecast_with_confidence(v, m.recurring, m.coverage)
     assert conf2 == conf and bt2.coverage == bt.coverage
 
@@ -143,3 +144,60 @@ def test_loan_cash_is_earmarked_not_a_cushion(session, categoriser):
     _, _, before, _ = _fc(session, categoriser, WORLD_END, max_ingest_seq=seq2)
     assert before.earmarked_loan_paise == 0
     assert fc.dip_probability >= before.dip_probability  # the new EMI can only add risk
+
+
+def test_one_earmark_rule_for_buffer_and_forecast_and_the_user_can_lift_it(session, categoriser):
+    """D29 + D33: buffer and forecast agree on whether the loan money exists; 'keep as reserve' lifts both."""
+    from app.engines.earmark import loan_earmarks
+    from app.ingest.service import set_loan_cash_use
+
+    _replay(session, categoriser, 3)
+    v, m, fc, _ = _fc(session, categoriser, WORLD_END)
+    (e,) = loan_earmarks(v)
+    assert e.unspent_paise == e.amount_paise and not e.kept_as_reserve  # disbursed today, nothing spent yet
+    assert m.earmarked_loan_paise == fc.earmarked_loan_paise == e.earmarked_paise
+    assert fc.dip_probability_if_kept is not None and fc.dip_probability_if_kept <= fc.dip_probability
+    alt = fc.assumptions[0]["alternative"]["dip_probability_if_kept"]
+    assert alt == fc.dip_probability_if_kept
+
+    set_loan_cash_use(session, "demo-a", e.txn_id, "reserve", FixedClock(WORLD_END))
+    session.commit()
+    v2, m2, fc2, _ = _fc(session, categoriser, WORLD_END)
+    assert m2.earmarked_loan_paise == fc2.earmarked_loan_paise == 0
+    assert m2.buffer_months > m.buffer_months and fc2.dip_probability == fc.dip_probability_if_kept
+    with pytest.raises(ValueError):
+        set_loan_cash_use(session, "demo-a", fc.schedule[0].item_id, "reserve", FixedClock(WORLD_END))
+
+
+def test_earmark_uses_running_minimum_so_salary_never_recreates_it():
+    from app.engines.earmark import loan_earmarks
+    from tests.helpers import make_view
+
+    d0 = dt.date(2026, 8, 1)
+    rows = [{"date": d0, "amount": 2_00_000_00, "direction": "credit", "category": "loan_disbursal",
+             "merchant_key": "tata_capital", "balance_after": 2_10_000_00},
+            {"date": d0 + dt.timedelta(days=2), "amount": 1_95_000_00, "category": "shopping", "merchant_key": "croma",
+             "balance_after": 15_000_00},  # spent on its purpose: balance back near the pre-loan ₹10,000
+            {"date": d0 + dt.timedelta(days=30), "amount": 92_000_00, "direction": "credit",
+             "category": "income_salary", "merchant_key": "acme_tech", "balance_after": 1_07_000_00}]
+    (e,) = loan_earmarks(make_view(rows, d0 + dt.timedelta(days=31)))
+    assert e.unspent_paise == 5_000_00  # lowest balance since (15,000) minus before (10,000); the salary doesn't count
+
+
+def test_confidence_caps_never_raise_and_never_invent_a_percentage():
+    from app.engines.backtest import Backtest, OriginResult, confidence
+
+    def bt(inside):
+        return Backtest([OriginResult(dt.date(2026, 6, 1), 100, inside, 0.5, True),
+                         OriginResult(dt.date(2026, 6, 16), 100, inside, 0.5, True)])
+    full = {"months_of_history": 6.0, "accounts_known": 4, "accounts_linked": 4}
+    assert confidence(None, full, bt(80)).label == "High"
+    assert confidence(None, full, bt(65)).label == "Medium"
+    assert confidence(None, full, bt(59)).label == "Low"
+    assert confidence(None, {**full, "months_of_history": 4.0}, bt(90)).label == "Medium"
+    assert confidence(None, {**full, "months_of_history": 2.0}, bt(90)).label == "Low"
+    assert confidence(None, {**full, "accounts_linked": 1}, bt(90)).label == "Low"
+    low = confidence(None, {**full, "accounts_linked": 3}, bt(50))
+    assert low.label == "Low" and low.caps == []  # a cap never raises a label
+    one = confidence(None, full, Backtest([OriginResult(dt.date(2026, 6, 1), 45, 45, 0.5, True)]))
+    assert one.label == "Low" and one.coverage is None and "not enough history" in one.reason

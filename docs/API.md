@@ -13,7 +13,10 @@ Status: **Approved 2026-09-23.** It is frozen at the end of Phase 6 together wit
 ```jsonc
 Quantity   { "value": 4000000, "unit": "paise|pct|months|days|count|score|date", "display": "₹40,000" }
 // pct value is a number in percent units (52.5), months/days numbers, date "2026-09-28"
-Confidence { "pct": 64, "label": "High|Medium|Low", "explain": "one-sentence method" }
+Confidence { "label": "High|Medium|Low", "reason": "band held on 65% of past days, target 80%",
+             "coverage": Quantity | null /* measured P10-P90 coverage: for the "why trust this" sheet ONLY */,
+             "caps": ["1 account not linked"], "origins": 8, "days": 321, "explain": "one-sentence method" }
+// The app shows label + reason next to a PREDICTION, never a second percentage (SPEC §6.4).
 
 Fact           { "id": "F3", "key": "income_monthly", "title": "Monthly income", "value": Quantity, "text": "..." }
 Prediction     { "id": "P1", "key": "dip_probability", "title": "...", "value": Quantity, "confidence": Confidence, "text": "..." }
@@ -53,7 +56,7 @@ Facts: score, band and pillar contributions. Predictions: dip probability (if > 
 All items are facts.
 
 ### GET `/v1/forecast`
-`data`: `{ horizon_days: 45, floor: Quantity, account: { account_id, institution, masked }, opening: Quantity, next_income_date, income_basis: "salary|irregular", series: [{ date, p10, p50, p90 }] /* paise ints, end of day, may be negative = shortfall */, dip_probability: Quantity, likely_dip_date: date|null, projected_low: Quantity, pre_income: { p10, p50, p90 }, bounce_risks: [{ name, kind, mandate: bool, due_date, amount: Quantity, probability: Quantity }], scheduled: [{ date, name, kind, direction, amount: Quantity, source: "detected|contract|card_statement|card_pattern", estimated: bool }], assumptions: [Assumption] /* e.g. earmarked loan cash, D33 */, confidence: Confidence, backtest: { origins, days, coverage_p10_p90: Quantity /* the number we quote */, dip_brier, mean_predicted_dip: Quantity, observed_dip_rate: Quantity } }`
+`data`: `{ horizon_days: 45, floor: Quantity, account: { account_id, institution, masked }, opening: Quantity, next_income_date, income_basis: "salary|irregular", series: [{ date, p10, p50, p90 }] /* paise ints, end of day, may be negative = shortfall */, dip_probability: Quantity, likely_dip_date: date|null, projected_low: Quantity, pre_income: { p10, p50, p90 }, bounce_risks: [{ name, kind, mandate: bool, due_date, amount: Quantity, probability: Quantity }], scheduled: [{ date, name, kind, direction, amount: Quantity, source: "detected|contract|card_statement|card_pattern", estimated: bool }], assumptions: [Assumption] /* e.g. earmarked loan cash, D33, with alternative: { dip_probability_if_kept } */, dip_probability_if_kept: Quantity | null, confidence: Confidence, backtest: { origins, days, coverage_p10_p90: Quantity /* the number we quote */, dip_brier, mean_predicted_dip: Quantity, observed_dip_rate: Quantity } }`
 All items are predictions, except floor, horizon and scheduled debit amounts/dates (facts). `floor` follows SPEC D17.
 
 ### GET `/v1/recommendations`
@@ -90,6 +93,9 @@ Response:
 - `sms`: `{ "transactions": [StructuredSmsTxn] }`, **structured only**. Any unknown field (e.g. `body`, `text`) → 422 (`extra="forbid"`).
 - `manual`: `{ "transactions": [ManualTxn] }`.
 Response `202`: `{ "ingest_id", "raw_count", "canonical_new", "duplicates_merged", "event_id" }`. Recompute is asynchronous. The app polls `/v1/timeline` (or passes `?wait=true` for up to 10 s of synchronous wait, as the demo does).
+
+### POST `/v1/loan-cash/{txn_id}`
+D33. Body: `{ "use": "reserve" | "purpose" }`. `reserve` lifts the loan-cash earmark in both the buffer and the forecast; `purpose` restores it. `txn_id` must be a loan disbursal. It triggers a recompute.
 
 ### POST `/v1/merchant-rules`
 A user correction (SPEC D21). Body: `{ "merchant_key": "m:vaishali_restaurant", "category": "dining" }` (or `{ "txn_id", "category" }`, which resolves to that transaction's merchant). It applies to past and future transactions of that merchant (`category_source: "user"`) and triggers a recompute (`data.ingested` with `source: "user_rule"`). The category list comes from `config/categories.yaml` and includes `uncategorised` (low-confidence ML, counted as essential).

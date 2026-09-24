@@ -124,7 +124,8 @@ Each extracted number carries `(value, unit, precision)`, where precision is the
 | `REF_UNKNOWN` | Every `ref` must exist in the registry. |
 | `REF_MISSING` | Each matched entry must be listed in the statement's `refs`. |
 | `LABEL_KIND` | Allowed kinds of matched entries: **FACT** → fact, user_input. **PREDICTION** → prediction, fact, user_input, assumption. **RECOMMENDATION** → recommendation, assumption, fact, user_input. Projected scores (12-month, combined plan, what-if) are registered as `recommendation`, so a FACT quoting one is blocked (D10). |
-| `PRED_NO_CONF` | A PREDICTION must contain its confidence: the pct (a match to a confidence entry) or the label word (High/Medium/Low, or ऊँचा/मध्यम/कम, zyada/medium/kam). |
+| `PRED_NO_CONF` | A PREDICTION must contain its confidence **label** (High/Medium/Low, or ऊँचा/मध्यम/कम, zyada/medium/kam). It may add the reason line ("band held on 65% of past days, target 80%"). |
+| `CONF_AS_PCT` | Confidence is never phrased as a percentage ("82% confident", "65% sure", "confidence of 70%"). The only confidence number is the backtest coverage, and only in the reason-line form (SPEC §6.4). |
 | `REC_NO_IMPACT` | A RECOMMENDATION must match ≥1 `recommendation`-kind entry (a simulated impact). |
 | `NUM_WORDS` | Money scale words with no digit (`do lakh`, `ek hazaar`, `two thousand`), or English number words `one…twenty` next to a unit. Best-effort. |
 | `LANG_MISMATCH` | `language` must equal the detected language, and the script must fit (hi → Devanagari majority; en/hinglish → Latin majority). |

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import load_yaml
 from app.core.dates import IST
-from app.db.models import Account, AccountState, Counterparty, MerchantRule, RawTransactionRow, User
+from app.db.models import Account, AccountState, Counterparty, MerchantRule, RawTransactionRow, User, UserPreference
 from app.db.repo import UserRepo
 from app.pipeline.categorise.model import Categoriser
 from app.pipeline.run import CounterpartyOut, run_pipeline
@@ -65,6 +65,7 @@ class View:
     txns: pl.DataFrame
     floor_paise: int
     ingest_seq: int  # watermark actually used
+    preferences: dict = field(default_factory=dict)  # user choices made by the cutoff (e.g. loan cash use)
 
     @property
     def operating(self) -> AccountView | None:
@@ -108,6 +109,7 @@ def build_view(session: Session, user_id: str, as_of: dt.date, categoriser: Cate
     for s in sorted(states, key=lambda s: (s.as_of_date, s.ingest_seq)):
         latest_state[s.account_id] = s
     rules = {r.merchant_key: r.category for r in repo.select(MerchantRule) if _aware(r.created_at) <= cutoff}
+    prefs = {p.key: dict(p.value) for p in repo.select(UserPreference) if _aware(p.created_at) <= cutoff}
 
     in_slice = {r.account_id for r in raw_rows} | set(latest_state)
     acc_rows = {a.account_id: a for a in repo.select(Account) if a.account_id in in_slice}
@@ -166,11 +168,12 @@ def build_view(session: Session, user_id: str, as_of: dt.date, categoriser: Cate
     _assign_roles(accounts, txns, as_of)
     floor = _floor(session, user_id, accounts)
     watermark = max([r.ingest_seq for r in raw_rows] + [s.ingest_seq for s in states], default=0)
-    return View(user_id, as_of, accounts, txns, floor, watermark)
+    return View(user_id, as_of, accounts, txns, floor, watermark, prefs)
 
 
 def _assign_roles(accounts: dict[str, AccountView], txns: pl.DataFrame, as_of: dt.date) -> None:
-    """Operating = the account receiving the primary salary; without salary, the most spend debits (D6)."""
+    """Operating = the account receiving the primary salary; without salary (gig income), the account receiving
+    the most income; then the most spend debits (D6, refined in Phase 3/3.5)."""
     recent = txns.filter(pl.col("date") > as_of - dt.timedelta(days=90))
     best, best_key = None, None
     for a in accounts.values():
@@ -181,7 +184,8 @@ def _assign_roles(accounts: dict[str, AccountView], txns: pl.DataFrame, as_of: d
             continue
         mine = recent.filter(pl.col("account_id") == a.account_id)
         salary = int(mine.filter(pl.col("category") == "income_salary")["amount"].sum() or 0)
-        key = (salary, mine.filter((pl.col("direction") == "debit") & pl.col("spend")).height, a.account_id)
+        income = int(mine.filter(pl.col("income") & (pl.col("direction") == "credit"))["amount"].sum() or 0)
+        key = (salary, income, mine.filter((pl.col("direction") == "debit") & pl.col("spend")).height, a.account_id)
         if best_key is None or key > best_key:
             best, best_key = a, key
     for a in accounts.values():

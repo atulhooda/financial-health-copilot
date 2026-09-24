@@ -9,12 +9,12 @@ band covers about 80%. This is the number behind confidence and the one we quote
 
 | Persona | Point | Origins | Days | P10–P90 coverage | Dip Brier | Mean predicted dip | Observed dip rate | Confidence |
 |---|---|---|---|---|---|---|---|---|
-| demo-a | step t0 (2026-09-20) | 8 | 321 | **65%** | 0.25 | 65% | 57% | 61% Medium |
-| demo-a | step 1 (2026-09-20) | 8 | 321 | **65%** | 0.25 | 65% | 57% | 82% High |
-| demo-a | step 2 (2026-11-20) | 12 | 503 | **67%** | 0.19 | 64% | 55% | 83% High |
-| demo-a | step 3 (2026-11-20) | 12 | 503 | **66%** | 0.19 | 64% | 55% | 83% High |
-| demo-b | T0 (2026-09-20) | 8 | 319 | **70%** | 0.19 | 35% | 0% | 87% High |
-| demo-c | T0 (2026-09-20) | 7 | 286 | **79%** | 0.00 | 0% | 0% | 98% High |
+| demo-a | step t0 (2026-09-20) | 8 | 321 | **65%** | 0.25 | 65% | 57% | Medium |
+| demo-a | step 1 (2026-09-20) | 8 | 321 | **65%** | 0.25 | 65% | 57% | Medium |
+| demo-a | step 2 (2026-11-20) | 12 | 503 | **67%** | 0.19 | 64% | 55% | Medium |
+| demo-a | step 3 (2026-11-20) | 12 | 503 | **66%** | 0.19 | 64% | 55% | Medium |
+| demo-b | T0 (2026-09-20) | 8 | 319 | **70%** | 0.19 | 35% | 0% | Medium |
+| demo-c | T0 (2026-09-20) | 7 | 286 | **79%** | 0.00 | 0% | 0% | Medium |
 
 ## Reading this
 
@@ -26,5 +26,5 @@ band covers about 80%. This is the number behind confidence and the one we quote
   over- or under-warn a user whose income is irregular.
 - **Persona C** has most of its operating-account flows scheduled (salary, EMIs, fees, card paid in full),
   so its band is narrow. Coverage tests whether the amount spreads on estimated items are honest.
-- Confidence = coverage/80% (capped at 1) × history (months/6) × linked/known accounts. A user whose band
-  misses often is told so. See SPEC §6.4 for the one-sentence version.
+- Confidence label: High at coverage >= 75%, Medium 60-75%, Low below 60%; history under six months or an
+  unlinked account can only cap it. The % shown anywhere is the measured coverage itself (SPEC §6.4).

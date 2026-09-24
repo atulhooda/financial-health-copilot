@@ -33,7 +33,7 @@ def test_doc_and_config_agree():
 def _metrics(**kw) -> Metrics:
     base = {f.name: None for f in dataclasses.fields(Metrics)}
     base.update(as_of=dt.date(2026, 9, 20), cycle_basis="salary", cycles=[], income_pattern="salaried",
-                income_monthly_paise=1, salary_level_paise=1, borrowed_liquid_paise=0,
+                income_monthly_paise=1, salary_level_paise=1, earmarked_loan_paise=0,
                 other_income_monthly_paise=0, spend_monthly_paise=0,
                 essential_monthly_paise=1, discretionary_monthly_paise=1, emi_monthly_paise=1,
                 debt_outstanding_paise=0, cards=[], recurring=[], overlaps=[], spend_by_category=[], drift=[],

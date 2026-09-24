@@ -121,6 +121,16 @@ class MerchantRule(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
 
 
+class UserPreference(Base):
+    """A user's explicit choice that engines must respect, e.g. "loan_cash:<txn_id>" -> {"use": "reserve"} (D33)."""
+
+    __tablename__ = "user_preferences"
+    user_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSONType)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+
+
 class Transaction(Base):
     """Canonical transaction after normalise -> transfer match -> dedupe -> categorise."""
 
@@ -234,8 +244,8 @@ class GlobalCounter(Base):
 
 
 USER_SCOPED_MODELS = [
-    User, Consent, Account, Balance, RawTransactionRow, AccountState, MerchantRule, Transaction, TransactionSource,
-    Counterparty,
+    User, Consent, Account, Balance, RawTransactionRow, AccountState, MerchantRule, UserPreference, Transaction,
+    TransactionSource, Counterparty,
     RecurringItem, Snapshot, SnapshotDiff, AskLog, ValidatorBlock,
 ]
 

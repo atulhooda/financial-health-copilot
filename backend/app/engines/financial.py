@@ -8,12 +8,12 @@ from dataclasses import dataclass, field
 import polars as pl
 
 from app.core.dates import add_months
+from app.engines.earmark import Earmark, loan_earmarks
 from app.engines.recurring import RecurringItem, detect_recurring, overlapping_subscriptions
 from app.engines.view import View
 
 TRAILING = 3
 P5_CYCLES = 6
-BORROWED_WINDOW_DAYS = 90
 
 
 @dataclass
@@ -49,7 +49,7 @@ class Metrics:
     discretionary_monthly_paise: int
     savings_rate: float | None
     liquid_paise: int | None
-    borrowed_liquid_paise: int  # recent loan disbursals excluded from the buffer (D29)
+    earmarked_loan_paise: int  # unspent recent loan cash excluded from the buffer (D29/D33)
     buffer_months: float | None
     emi_monthly_paise: int
     emi_to_income: float | None
@@ -67,6 +67,7 @@ class Metrics:
     bounces: int
     floor_paise: int
     coverage: dict = field(default_factory=dict)
+    earmarks: list[Earmark] = field(default_factory=list)
 
 
 # ---- helpers -------------------------------------------------------------------------------------
@@ -182,9 +183,9 @@ def compute_metrics(view: View, recurring: list[RecurringItem] | None = None) ->
     # ---- balances, buffer ----
     bal = [a.balance_paise for a in view.of_kind("savings", "current") if a.visible and a.balance_paise is not None]
     liquid = sum(bal) if bal else None
-    # D29: borrowed cash is not a buffer. Loan disbursals received in the last 90 days are excluded.
-    borrowed = int(tx.filter((pl.col("category") == "loan_disbursal") & (pl.col("direction") == "credit")
-                             & (pl.col("date") > view.as_of - dt.timedelta(days=BORROWED_WINDOW_DAYS)))["amount"].sum() or 0)
+    # D29/D33: borrowed cash still sitting in the account is not a buffer (one shared earmark rule).
+    earmarks = loan_earmarks(view)
+    borrowed = sum(e.earmarked_paise for e in earmarks)
     own_liquid = max(0, liquid - borrowed) if liquid is not None else None
     buffer = own_liquid / essential_m if own_liquid is not None and essential_m > 0 else None
 
@@ -246,9 +247,9 @@ def compute_metrics(view: View, recurring: list[RecurringItem] | None = None) ->
         as_of=view.as_of, cycle_basis=basis, cycles=cycles, income_pattern=pattern, income_monthly_paise=income,
         salary_level_paise=salary_level, other_income_monthly_paise=other_income, spend_monthly_paise=spend_m,
         essential_monthly_paise=essential_m, discretionary_monthly_paise=discretionary_m, savings_rate=savings_rate,
-        liquid_paise=liquid, borrowed_liquid_paise=borrowed, buffer_months=buffer, emi_monthly_paise=emi_m,
+        liquid_paise=liquid, earmarked_loan_paise=borrowed, buffer_months=buffer, emi_monthly_paise=emi_m,
         emi_to_income=emi_m / income if income > 0 else None, debt_outstanding_paise=debt,
         debt_to_income=debt / (12 * income) if income > 0 else None, cards=cards, credit_utilisation=util,
         revolving_paise=revolving, recurring=recurring, overlaps=overlapping_subscriptions(recurring),
         spend_by_category=by_cat, drift=drift, discretionary_ratio=disc_ratio, cycle_lows=lows, bounces=bounces,
-        floor_paise=view.floor_paise, coverage=coverage)
+        floor_paise=view.floor_paise, coverage=coverage, earmarks=earmarks)

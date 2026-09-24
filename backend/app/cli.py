@@ -97,8 +97,10 @@ def demo() -> None:
         if fc.available:
             top = next((b for b in fc.bounce_risks if b.mandate), fc.bounce_risks[0] if fc.bounce_risks else None)
             typer.echo(f"     forecast: dip below {fmt(fc.floor_paise)} before {fc.next_income_date}: "
-                       f"{fc.dip_probability:.0%} (likely {fc.likely_dip_date}); confidence {conf.pct}% {conf.label} "
-                       f"[P10-P90 coverage {conf.coverage:.0%} over {conf.origins} backtest origins]")
+                       f"{fc.dip_probability:.0%} (likely {fc.likely_dip_date}); confidence {conf.label}: {conf.reason}")
+            if fc.dip_probability_if_kept is not None:
+                typer.echo(f"     assumes {fmt(fc.earmarked_loan_paise)} of loan money goes to its purpose; "
+                           f"if you keep it, dip risk is {fc.dip_probability_if_kept:.0%}")
             if top:
                 typer.echo(f"     bounce risk: {top.name} {fmt(top.amount_paise)} on {top.due_date}: {top.probability:.0%}")
         if att:
@@ -153,7 +155,7 @@ def backtest_report() -> None:
     _write_forecast_report(rows, REPO_DIR / "docs" / "FORECAST.md")
     for user, label, _as_of, fc, conf, bt in rows:
         typer.echo(f"{user} {label:7s} coverage={bt.coverage:.1%} origins={len(bt.origins)} brier={bt.brier} "
-                   f"dip={fc.dip_probability:.1%} confidence={conf.pct}% {conf.label}")
+                   f"dip={fc.dip_probability:.1%} confidence={conf.label} ({conf.reason})")
 
 
 def _migrate(engine) -> None:
@@ -188,7 +190,7 @@ def _write_forecast_report(rows, path) -> None:
     for user, label, as_of, _fc, conf, bt in rows:
         brier = "n/a" if bt.brier is None else f"{bt.brier:.2f}"
         lines.append(f"| {user} | {label} ({as_of}) | {len(bt.origins)} | {bt.days} | **{pct(bt.coverage)}** | {brier} |"
-                     f" {pct(bt.mean_predicted_dip)} | {pct(bt.observed_dip_rate)} | {conf.pct}% {conf.label} |")
+                     f" {pct(bt.mean_predicted_dip)} | {pct(bt.observed_dip_rate)} | {conf.label} |")
     lines += [
         "",
         "## Reading this",
@@ -201,8 +203,8 @@ def _write_forecast_report(rows, path) -> None:
         "  over- or under-warn a user whose income is irregular.",
         "- **Persona C** has most of its operating-account flows scheduled (salary, EMIs, fees, card paid in full),",
         "  so its band is narrow. Coverage tests whether the amount spreads on estimated items are honest.",
-        "- Confidence = coverage/80% (capped at 1) × history (months/6) × linked/known accounts. A user whose band",
-        "  misses often is told so. See SPEC §6.4 for the one-sentence version.",
+        "- Confidence label: High at coverage >= 75%, Medium 60-75%, Low below 60%; history under six months or an",
+        "  unlinked account can only cap it. The % shown anywhere is the measured coverage itself (SPEC §6.4).",
         "",
     ]
     path.write_text("\n".join(lines), encoding="utf-8")

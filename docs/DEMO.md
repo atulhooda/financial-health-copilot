@@ -64,7 +64,7 @@ Persona A pays a home-tiffin service, **GHARGUTI DABBA**, ₹1,800 on the 3rd of
 
 ## 6. Judge Q&A crib
 - *"Does the AI make up numbers?"* No. Open the trace: every number has a registry id from a tool call, and the validator blocks anything else. Show a blocked attempt from `validator_blocks`.
-- *"How confident is the forecast?"* Give the confidence sentence (SPEC §6.4).
+- *"How confident is the forecast?"* Give the confidence sentence (SPEC §6.4) and the coverage from `docs/FORECAST.md`, e.g. "our band held on 65% of Aarav's past days; target 80%, so we say Medium."
 - *"Are you an AA?"* No. The mock sits behind the interface a licensed FIU partner adapter would use.
 - *"Does SMS leave the phone?"* No. The API has no field that can hold SMS text (422 on any extra field).
 - *"Investment advice?"* No. The scope guard refuses before the LLM is called. We're not a SEBI RIA.
