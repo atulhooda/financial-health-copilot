@@ -1,0 +1,83 @@
+# Words the copilot shows, in English, Hindi (Devanagari) and Hinglish (Latin). No numbers here: every number in an
+# answer comes from the registry.
+
+bands:
+  Poor: {en: Poor, hi: कमज़ोर, hinglish: kamzor}
+  Fair: {en: Fair, hi: ठीक-ठाक, hinglish: theek-thaak}
+  Good: {en: Good, hi: अच्छा, hinglish: accha}
+
+confidence_labels:
+  High: {en: High, hi: ऊँचा, hinglish: High}
+  Medium: {en: Medium, hi: मध्यम, hinglish: Medium}
+  Low: {en: Low, hi: कम, hinglish: Low}
+
+pillars:
+  savings: {en: savings, hi: बचत, hinglish: bachat}
+  buffer: {en: emergency buffer, hi: आपातकालीन बचत, hinglish: emergency buffer}
+  debt: {en: debt load, hi: कर्ज़ का बोझ, hinglish: karz ka bojh}
+  credit: {en: credit health, hi: क्रेडिट की सेहत, hinglish: credit ki sehat}
+  liquidity: {en: pre-salary liquidity, hi: सैलरी से पहले का बैलेंस, hinglish: salary se pehle ka balance}
+  stability: {en: spending stability, hi: खर्च की स्थिरता, hinglish: kharch ki stability}
+
+categories:
+  rent: {en: rent, hi: किराया, hinglish: kiraya}
+  emi: {en: EMIs, hi: EMI, hinglish: EMI}
+  groceries: {en: groceries, hi: राशन, hinglish: ration}
+  utilities: {en: utilities, hi: बिजली-पानी, hinglish: bijli-paani}
+  telecom: {en: phone and internet, hi: फ़ोन और इंटरनेट, hinglish: phone aur internet}
+  education: {en: education, hi: पढ़ाई, hinglish: padhai}
+  health: {en: health, hi: सेहत, hinglish: health}
+  insurance: {en: insurance, hi: बीमा, hinglish: insurance}
+  fuel: {en: fuel, hi: पेट्रोल, hinglish: petrol}
+  transport: {en: transport, hi: आना-जाना, hinglish: travel/cab}
+  food_delivery: {en: food delivery, hi: खाना मँगाना, hinglish: food delivery}
+  dining: {en: eating out, hi: बाहर खाना, hinglish: bahar khana}
+  shopping: {en: shopping, hi: शॉपिंग, hinglish: shopping}
+  ott_subscription: {en: streaming subscriptions, hi: OTT सब्सक्रिप्शन, hinglish: OTT subscriptions}
+  entertainment: {en: entertainment, hi: मनोरंजन, hinglish: entertainment}
+  travel: {en: travel, hi: यात्रा, hinglish: travel}
+  cash_withdrawal: {en: cash withdrawals, hi: कैश निकासी, hinglish: cash nikaalna}
+  fees_charges: {en: fees and charges, hi: फ़ीस और चार्ज, hinglish: fees aur charges}
+  card_interest: {en: card interest, hi: कार्ड का ब्याज, hinglish: card ka byaaj}
+  transfer_person: {en: payments to people, hi: लोगों को भुगतान, hinglish: logon ko payment}
+  transfer_unseen: {en: transfers to accounts we can't see, hi: अनदेखे खातों में ट्रांसफ़र, hinglish: unlinked accounts
+    mein transfer}
+  card_bill_unlinked: {en: card bills (card not linked), hi: कार्ड बिल (कार्ड लिंक नहीं), hinglish: card bill (card link
+    nahi)}
+  uncategorised: {en: uncategorised, hi: बिना श्रेणी, hinglish: uncategorised}
+  other: {en: other, hi: अन्य, hinglish: baaki}
+
+reasons:
+  NEW_DATA_REVEALED: {en: newly linked data showed things we couldn't see before, hi: नए लिंक हुए डेटा से पहले न दिखी बातें
+      सामने आईं, hinglish: naye link hue data se pehle na dikhi cheezein saamne aayi}
+  ACCOUNT_LINKED: {en: an account was linked, hi: एक खाता लिंक हुआ, hinglish: ek account link hua}
+  HIGH_COST_DEBT_FOUND: {en: expensive card debt showed up, hi: महँगा कार्ड कर्ज़ दिखा, hinglish: mehenga card karz dikha}
+  DEBT_CLEARED: {en: the card debt was cleared, hi: कार्ड का कर्ज़ चुक गया, hinglish: card ka karz chuk gaya}
+  DEBT_GROWING: {en: the card balance kept growing, hi: कार्ड का बकाया बढ़ता रहा, hinglish: card ka bakaya badhta raha}
+  INCOME_INCREASED: {en: your income went up, hi: आपकी आय बढ़ी, hinglish: aapki income badhi}
+  INCOME_DECREASED: {en: your income went down, hi: आपकी आय घटी, hinglish: aapki income ghati}
+  NEW_EMI_ADDED: {en: a new EMI started, hi: एक नई EMI शुरू हुई, hinglish: ek nayi EMI shuru hui}
+  EMI_CLOSED: {en: an EMI ended, hi: एक EMI ख़त्म हुई, hinglish: ek EMI khatam hui}
+  SUBSCRIPTION_OVERLAP_FOUND: {en: overlapping subscriptions were found, hi: एक जैसे कई सब्सक्रिप्शन मिले, hinglish: ek
+      jaise kai subscriptions mile}
+  SUBSCRIPTION_CANCELLED: {en: a subscription was cancelled, hi: एक सब्सक्रिप्शन बंद हुआ, hinglish: ek subscription band
+      hua}
+  SPENDING_DRIFT_UP: {en: some spending rose above your usual month, hi: कुछ खर्च आम महीने से ज़्यादा हुआ, hinglish: kuch
+      kharch aam mahine se zyada hua}
+  DIP_RISK_UP: {en: the chance of running low rose, hi: बैलेंस कम पड़ने का ख़तरा बढ़ा, hinglish: balance kam padne ka
+      khatra badha}
+  DIP_RISK_DOWN: {en: the chance of running low fell, hi: बैलेंस कम पड़ने का ख़तरा घटा, hinglish: balance kam padne ka
+      khatra ghata}
+  BOUNCE_RISK_UP: {en: the risk of an EMI bouncing rose, hi: EMI बाउंस होने का ख़तरा बढ़ा, hinglish: EMI bounce hone ka
+      khatra badha}
+  BOUNCE_RISK_DOWN: {en: the risk of an EMI bouncing fell, hi: EMI बाउंस होने का ख़तरा घटा, hinglish: EMI bounce hone ka
+      khatra ghata}
+  SCORE_BAND_CHANGED: {en: your score moved to another band, hi: आपका स्कोर दूसरे बैंड में गया, hinglish: aapka score
+      doosre band mein gaya}
+  CONFIDENCE_CHANGED: {en: the forecast's confidence changed, hi: अनुमान का भरोसा बदला, hinglish: forecast ka confidence
+      badla}
+
+joiners:
+  and: {en: " and ", hi: " और ", hinglish: " aur "}
+  list: {en: ", ", hi: ", ", hinglish: ", "}
+  reasons: {en: "; ", hi: "; ", hinglish: "; "}

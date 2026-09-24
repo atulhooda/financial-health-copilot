@@ -1,0 +1,167 @@
+"""Copilot eval (Phase 5 item 7): 30 questions in three languages, the review's metrics, and a markdown report.
+
+Metrics: first-draft validator block rate, retry success, template fallback rate, label-rule violations (first drafts
+and delivered answers), median latency; plus guard, language and intent accuracy.
+"""
+from __future__ import annotations
+
+import statistics
+from collections import Counter
+from pathlib import Path
+
+from app.copilot.llm.base import LLMClient
+from app.copilot.orchestrator import Copilot
+from app.core.clock import Clock, get_clock
+from app.core.config import load_yaml
+
+LABEL_RULES = ("LABEL_KIND", "PRED_NO_CONF", "REC_NO_IMPACT", "ASSUMPTION_NOT_CITED", "CONF_AS_PCT")
+
+
+def run_eval(llm: LLMClient, user_id: str, session_factory=None, categoriser=None, clock: Clock | None = None) -> dict:
+    if session_factory is None:
+        from app.db.session import get_engine, make_sessionmaker
+
+        session_factory = make_sessionmaker(get_engine())
+    if categoriser is None:
+        from app.pipeline.categorise.train import get_categoriser
+
+        categoriser = get_categoriser()
+    cp = Copilot(session_factory, categoriser, llm, clock=clock or get_clock(), persist=False)
+    rows = []
+    for q in load_yaml("copilot_eval")["questions"]:
+        a = cp.ask(user_id, q["text"])
+        rows.append({"id": q["id"], "text": q["text"], "language": q["language"], "expected_guard": q.get("guard"),
+                     "expected_intent": q.get("intent"), "detected_language": a.language, "guard": a.guard,
+                     "intent": a.intent, "path": a.path, "fallback_reason": a.fallback_reason,
+                     "attempts": a.attempts, "final_errors": a.final_errors, "tool_calls": a.tool_calls,
+                     "latency_ms": a.latency_ms, "statements": len(a.statements), "as_of": a.as_of,
+                     "answer": a.statements, "message": a.message, "checkin": a.checkin})
+    return {"provider": llm.provider, "model": llm.model, "user": user_id,
+            "as_of": next((r["as_of"] for r in rows if r["as_of"]), None), "rows": rows,
+            "metrics": metrics(rows, llm.provider)}
+
+
+def _rate(n: int, d: int) -> dict:
+    return {"n": n, "of": d, "rate": round(n / d, 3) if d else None}
+
+
+def metrics(rows: list[dict], provider: str) -> dict:
+    guarded = [r for r in rows if r["expected_guard"] in ("distress", "scope")]
+    answered = [r for r in rows if r not in guarded]
+    drafted = [r for r in answered if r["attempts"]]
+    blocked_first = [r for r in drafted if not r["attempts"][0]["ok"]]
+    retried_ok = [r for r in blocked_first if len(r["attempts"]) > 1 and r["attempts"][1]["ok"]]
+    first_codes = Counter(e["code"] for r in drafted for e in r["attempts"][0]["errors"])
+    all_codes = Counter(e["code"] for r in drafted for a in r["attempts"] for e in a["errors"])
+    lat_all = [r["latency_ms"] for r in rows]
+    lat_answered = [r["latency_ms"] for r in answered]
+    out = {
+        "questions": len(rows),
+        "guard_correct": _rate(sum(r["guard"] == r["expected_guard"] for r in rows), len(rows)),
+        "language_correct": _rate(sum(r["detected_language"] == r["language"] for r in rows), len(rows)),
+        "intent_correct": _rate(sum(r["intent"] == r["expected_intent"] for r in answered), len(answered)),
+        "delivered_label_rule_violations": sum(1 for r in rows for e in r["final_errors"]),
+        "median_latency_ms": statistics.median(lat_all) if lat_all else None,
+        "median_latency_ms_answered": statistics.median(lat_answered) if lat_answered else None,
+        "p90_latency_ms_answered": sorted(lat_answered)[int(0.9 * (len(lat_answered) - 1))] if lat_answered else None,
+    }
+    if provider != "none":
+        out.update({
+            "reached_llm": len(answered),
+            "first_draft_block_rate": _rate(len(blocked_first), len(drafted)),
+            "retry_success": _rate(len(retried_ok), len(blocked_first)),
+            "template_fallback_rate": _rate(sum(r["path"] == "template" for r in answered), len(answered)),
+            "fallback_reasons": dict(Counter(r["fallback_reason"] for r in answered if r["fallback_reason"])),
+            "first_draft_label_rule_violations": sum(first_codes[c] for c in LABEL_RULES),
+            "first_draft_error_codes": dict(first_codes),
+            "all_attempt_error_codes": dict(all_codes),
+            "median_tool_calls": statistics.median([r["tool_calls"] for r in answered]) if answered else None,
+        })
+    return out
+
+
+def _fmt_rate(m: dict | None) -> str:
+    if not m:
+        return "n/a"
+    if m["rate"] is None:
+        return f"n/a (0 of {m['of']})"
+    return f"{m['rate'] * 100:.0f}% ({m['n']}/{m['of']})"
+
+
+def write_report(result: dict, path: Path) -> None:
+    m, rows = result["metrics"], result["rows"]
+    llm = result["provider"] != "none"
+    lines = [
+        "# Copilot eval",
+        "",
+        "Generated by `hisaab eval-copilot` (Phase 5 item 7). 30 questions: 10 English, 10 Hindi (Devanagari), 10 "
+        "Hinglish (Latin script), covering afford-an-EMI, where the money goes, running short, why the score "
+        "changed, trade-off questions, the summary, both distress tiers and the scope guard "
+        "(`backend/config/copilot_eval.yaml`).",
+        "",
+        f"- Provider: **{result['provider']}**" + (f", model `{result['model']}`" if llm else " (templates only)"),
+        f"- User: `{result['user']}`, data as of {result['as_of']}",
+        "",
+        "## Metrics",
+        "",
+        "| Metric | Value |",
+        "|---|---|",
+    ]
+    if llm:
+        lines += [
+            f"| First-draft validator block rate | {_fmt_rate(m['first_draft_block_rate'])} |",
+            f"| Retry success (blocked first drafts fixed on retry) | {_fmt_rate(m['retry_success'])} |",
+            f"| Template fallback rate | {_fmt_rate(m['template_fallback_rate'])} |",
+            f"| Label-rule violations in first drafts ({', '.join(LABEL_RULES)}) | "
+            f"{m['first_draft_label_rule_violations']} |",
+        ]
+    else:
+        lines += ["| First-draft block rate, retry success, template fallback rate | n/a: no LLM (every answer is a "
+                  "template) |"]
+    lines += [
+        f"| Label-rule violations in delivered answers (re-validated) | {m['delivered_label_rule_violations']} |",
+        f"| Median latency, all questions | {m['median_latency_ms']} ms |",
+        f"| Median latency, answered (not stopped by a guard) | {m['median_latency_ms_answered']} ms |",
+        f"| P90 latency, answered | {m['p90_latency_ms_answered']} ms |",
+        f"| Guard decisions correct | {_fmt_rate(m['guard_correct'])} |",
+        f"| Language detected correctly | {_fmt_rate(m['language_correct'])} |",
+        f"| Template intent correct | {_fmt_rate(m['intent_correct'])} |",
+    ]
+    if not llm:
+        lines += ["", "**This run used `LLM_PROVIDER=none`, so it measures the deterministic path only** (guards, "
+                      "language detection, intents, templates and the validator on template output). The LLM "
+                      "metrics the review asked for (first-draft block rate, retry success, template fallback rate, "
+                      "first-draft label-rule violations, LLM latency) need the provider we demo with: "
+                      "`LLM_PROVIDER=anthropic LLM_MODEL=... LLM_API_KEY=... hisaab eval-copilot` (or "
+                      "`openai_compat` with `LLM_BASE_URL`)."]
+    if llm:
+        lines += ["", f"First-draft error codes: `{m['first_draft_error_codes']}`. All attempts: "
+                      f"`{m['all_attempt_error_codes']}`. Fallback reasons: `{m['fallback_reasons']}`. Median tool "
+                      f"calls per answered question: {m['median_tool_calls']}."]
+    lines += ["", "## Questions", "",
+              "| id | question | guard | intent | path | first-draft errors | statements | ms |",
+              "|---|---|---|---|---|---|---|---|"]
+    for r in rows:
+        first = ", ".join(sorted({e["code"] for e in r["attempts"][0]["errors"]})) if r["attempts"] else ""
+        guard = r["guard"] or "-"
+        if r["guard"] != r["expected_guard"]:
+            guard += f" (expected {r['expected_guard'] or '-'})"
+        intent = r["intent"] or "-"
+        if r["expected_intent"] and r["intent"] != r["expected_intent"]:
+            intent += f" (expected {r['expected_intent']})"
+        path_ = r["path"] + (f" ({r['fallback_reason']})" if r["fallback_reason"] else "")
+        text = r["text"].replace("|", "\\|")
+        lines.append(f"| {r['id']} | {text} | {guard} | {intent} | {path_} | {first or '-'} | {r['statements']} | "
+                     f"{r['latency_ms']} |")
+    lines += ["", "## Answers", ""]
+    for r in rows:
+        lines.append(f"**{r['id']}** {r['text']}")
+        lines.append("")
+        if r["checkin"]:
+            lines.append(f"- _check-in:_ {r['checkin']}")
+        if r["message"]:
+            lines.append(f"- _{r['path']}:_ {r['message']}")
+        for st in r["answer"]:
+            lines.append(f"- **{st['label']}** {st['text']} `{' '.join(st['refs'])}`")
+        lines.append("")
+    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")

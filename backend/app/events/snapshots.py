@@ -18,7 +18,7 @@ from app.db.repo import UserRepo
 from app.engines import ENGINE_VERSION
 from app.engines.attribution import attribute_change
 from app.engines.backtest import forecast_with_confidence
-from app.engines.financial import compute_metrics
+from app.engines.financial import compute_metrics, top_merchants
 from app.engines.score import compute_score
 from app.engines.simulate import build_context, max_mandate_bounce, recommend
 from app.engines.view import build_view
@@ -96,6 +96,7 @@ def compute_payload(session: Session, user_id: str, as_of: dt.date, categoriser:
                                                    "amount_variable", "pending_change", "subscription_group")}
                       for r in m.recurring],
         "overlaps": m.overlaps, "spend_by_category": m.spend_by_category, "drift": m.drift,
+        "top_merchants_30d": top_merchants(view),
         "earmarks": m.earmarks,
         "score": sc,
         "forecast": {k: getattr(fc, k) for k in (

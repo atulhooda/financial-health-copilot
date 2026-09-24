@@ -30,6 +30,7 @@ def seed() -> None:
     from app.db.session import session_scope
     from app.demo.personas import BC_AS_OF, T0
     from app.demo.scenario import seed_payloads
+    from app.events.snapshots import take_snapshot
     from app.ingest.registry import adapter_for
     from app.ingest.service import ingest_batch
     from app.pipeline.categorise.train import get_categoriser
@@ -46,6 +47,9 @@ def seed() -> None:
                 r = ingest_batch(s, pid, batch, cat, clock)
             typer.echo(f"{pid:7s} {source:9s} raw={r.raw_count:4d} new={r.raw_new:4d} "
                        f"canonical={r.canonical_total:4d} merged={r.duplicates_merged}")
+        with session_scope() as s:  # SPEC §10: every persona starts with a snapshot (the copilot reads it)
+            snap, _, _ = take_snapshot(s, pid, clock.today(), "seed", cat, clock)
+            typer.echo(f"{pid:7s} snapshot  {snap.snapshot_id} as_of {snap.as_of} score {snap.payload['score']['total']}")
 
 
 @app.command()
@@ -66,9 +70,82 @@ def demo() -> None:
         _print_step(r, format_inr)
 
 
+@app.command()
+def ask(question: str, user: str = typer.Option("demo-a", "--user", help="user id"),
+        provider: str | None = typer.Option(None, "--provider", help="anthropic | openai_compat | none "
+                                                                      "(default: LLM_PROVIDER)"),
+        debug: bool = typer.Option(False, "--debug", help="print the masked trace"),
+        as_json: bool = typer.Option(False, "--json", help="print the answer as JSON")) -> None:
+    """Ask the copilot (docs/COPILOT.md). Every number is labelled and traceable to its registry entry."""
+    from app.copilot.llm import LLMUnavailable, get_llm
+    from app.copilot.orchestrator import Copilot
+    from app.db.session import get_engine, make_sessionmaker
+    from app.pipeline.categorise.train import get_categoriser
+
+    try:
+        llm = get_llm(provider)
+    except LLMUnavailable as e:
+        raise typer.Exit(_fail(str(e))) from e
+    ans = Copilot(make_sessionmaker(get_engine()), get_categoriser(), llm).ask(user, question, debug=debug or None)
+    if as_json:
+        typer.echo(json.dumps(ans.to_dict(), ensure_ascii=False, indent=1, default=str))
+        return
+    _print_answer(ans, llm)
+
+
+def _print_answer(ans, llm) -> None:
+    via = f"{llm.provider}" + (f" {llm.model}" if llm.provider != "none" else "")
+    fallback = f", fell back: {ans.fallback_reason}" if ans.fallback_reason else ""
+    typer.echo(f"{ans.user_id} · data as of {ans.as_of or '-'} · {ans.language} · path {ans.path} ({via}{fallback}) "
+               f"· {ans.latency_ms} ms")
+    if ans.checkin:
+        typer.echo(f"\n{ans.checkin}")
+    if ans.message:
+        typer.echo(f"\n{ans.message}")
+        for sug in ans.suggestions:
+            typer.echo(f"  - {sug}")
+    for label, title in (("FACT", "FACT"), ("PREDICTION", "PREDICTION"), ("RECOMMENDATION", "RECOMMENDATION")):
+        rows = [st for st in ans.statements if st["label"] == label]
+        if rows:
+            typer.echo(f"\n{title}")
+        for st in rows:
+            typer.echo(f"  • {st['text']}")
+            for r in st["refs"]:
+                src = ans.sources.get(r)
+                if src:
+                    typer.echo(f"      {r:<4} {src['display']:<14} {src['kind']}: {src['desc']}")
+    if ans.trace:
+        typer.echo("\ntrace (masked):")
+        typer.echo(json.dumps(ans.trace, ensure_ascii=False, indent=1, default=str))
+
+
+@app.command("eval-copilot")
+def eval_copilot(provider: str | None = typer.Option(None, "--provider", help="default: LLM_PROVIDER"),
+                 user: str = typer.Option("demo-a", "--user"),
+                 out: str = typer.Option("docs/COPILOT_EVAL.md", "--out", help="report path (repo-relative)")) -> None:
+    """Run the 30-question eval (config/copilot_eval.yaml) and write the report (Phase 5 item 7)."""
+    from app.copilot.eval import run_eval, write_report
+    from app.copilot.llm import LLMUnavailable, get_llm
+
+    try:
+        llm = get_llm(provider)
+    except LLMUnavailable as e:
+        raise typer.Exit(_fail(str(e))) from e
+    result = run_eval(llm, user)
+    path = REPO_DIR / out
+    write_report(result, path)
+    typer.echo(json.dumps(result["metrics"], indent=1, ensure_ascii=False))
+    typer.echo(f"wrote {path}")
+
+
 def _fail(msg: str) -> int:
     typer.echo(msg, err=True)
     return 1
+
+
+def _prob(p: float) -> str:
+    """Monte Carlo probabilities never read 0% or 100% (same rule as the copilot)."""
+    return "over 99%" if p >= 0.995 else "under 1%" if p < 0.005 else f"{p:.0%}"
 
 
 def _print_step(r, fmt) -> None:
@@ -86,14 +163,14 @@ def _print_step(r, fmt) -> None:
     top = next((a for a in p["alerts"] if a["kind"] == "bounce_risk"), None)
     if top:
         typer.echo(f"     bounce risk: {top['name']} {fmt(top['amount_paise'])} on {top['due_date']}: "
-                   f"{top['probability']:.0%}")
+                   f"{_prob(top['probability'])}")
     if fc["available"]:
         sat = " (saturated: no dip reason codes, D34)" if fc["dip_saturated"] else ""
         typer.echo(f"     dip below {fmt(fc['floor_paise'])} before {fc['next_income_date']}: "
-                   f"{fc['dip_probability']:.0%}{sat}; confidence {conf['label']}: {conf['reason']}")
+                   f"{_prob(fc['dip_probability'])}{sat}; confidence {conf['label']}: {conf['reason']}")
         if fc.get("dip_probability_if_kept") is not None:
             typer.echo(f"     assumes {fmt(fc['earmarked_loan_paise'])} of loan money goes to its purpose; "
-                       f"if you keep it, dip risk is {fc['dip_probability_if_kept']:.0%}")
+                       f"if you keep it, dip risk is {_prob(fc['dip_probability_if_kept'])}")
     dg = p.get("debt_growth")
     if dg:
         typer.echo(f"     debt growing: card balance carried grew {fmt(dg['revolving_from_paise'])} -> "
@@ -108,19 +185,20 @@ def _print_step(r, fmt) -> None:
             continue
         typer.echo(f"         12-month score {i['score_12m_baseline']} -> {i['score_12m_with_action']} "
                    f"({i['score_delta_12m']:+d}); {fmt(i['annual_impact_paise'])} a year; bounce risk "
-                   f"{i['bounce_risk_before']:.0%} -> {i['bounce_risk_after']:.0%}; confidence {rec['confidence']['label']}")
+                   f"{_prob(i['bounce_risk_before'])} -> {_prob(i['bounce_risk_after'])}; "
+                   f"confidence {rec['confidence']['label']}")
         down = rec["extra"].get("downside")
         if down and down.get("rebuild_to_paise"):
             typer.echo(f"         if you go back to paying ~{down['pay_share']:.0%}: the balance rebuilds to about "
                        f"{fmt(down['rebuild_to_paise'])} within {down['months_to_rebuild']} months")
         chk = rec["extra"].get("post_clear_check") or {}
         if chk.get("raises"):
-            typer.echo(f"         paying the full statement raises bounce risk ({chk['bounce_risk_before']:.0%} -> "
-                       f"{chk['bounce_risk_after']:.0%} over 90 days): cushion sized up by "
+            typer.echo(f"         paying the full statement raises bounce risk ({_prob(chk['bounce_risk_before'])} -> "
+                       f"{_prob(chk['bounce_risk_after'])} over 90 days): cushion sized up by "
                        f"{fmt(chk['extra_cushion_paise'])}")
     for o in p.get("what_if_offers", []):
-        typer.echo(f"     explore: {o['title']}  [bounce risk {o['impact']['bounce_risk_before']:.0%} -> "
-                   f"{o['impact']['bounce_risk_after']:.0%}]")
+        typer.echo(f"     explore: {o['title']}  [bounce risk {_prob(o['impact']['bounce_risk_before'])} -> "
+                   f"{_prob(o['impact']['bounce_risk_after'])}]")
     if r.diff:
         typer.echo(f"     reason codes: {', '.join(r.diff.reason_codes)}")
         for c in r.diff.payload["rec_changes"]:

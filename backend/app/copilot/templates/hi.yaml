@@ -1,0 +1,149 @@
+# हिंदी टेम्पलेट (देवनागरी)। Slot rules as in en.yaml. No digits or number words outside slots.
+
+confidence:
+  full: "भरोसा: {label}; पिछले दिनों में से {conf.coverage} पर बैंड सही रहा, लक्ष्य {conf.target}"
+  short: "भरोसा: {label}"
+assumes: "मान्यता: {items}।"
+assumptions:
+  savings_interest: "बचत पर सालाना {value} ब्याज"
+  pay_in_full_after: "कार्ड साफ़ होने के बाद आप हर महीने पूरा बिल भरेंगे"
+  unswept_spend_share: "बची हुई रकम का आधा हिस्सा वैसे भी ख़र्च हो जाता है"
+  lender_approval: "लेंडर की मंज़ूरी (फ़ीस लग सकती है)"
+  emi_rate: "सालाना {value} ब्याज"
+  tenure: "{value} की अवधि"
+  card_rate: "कार्ड पर हर महीने {value} ब्याज"
+
+intents:
+  afford_emi:
+    - label: FACT
+      text: "आपकी मासिक आय {income_monthly} है, और EMI पहले से इसका {emi_to_income} ले रही हैं।"
+    - label: PREDICTION
+      when: bounce.m1.probability
+      text: "नई EMI से पहले ही, {bounce.m1.due} को {=bounce.m1.name} के {bounce.m1.amount} के भुगतान के बाउंस होने की
+        संभावना {bounce.m1.probability} है ({@confidence})।"
+    - label: RECOMMENDATION
+      when: sim.new_emi.score_delta
+      text: "{sim.new_emi.tenure} के लिए {sim.new_emi.principal} उधार लेने पर EMI {sim.new_emi.emi} होगी: EMI आपकी
+        आय का {sim.new_emi.eti_after} ले लेंगी, और साल भर बाद आपका स्कोर {sim.new_emi.score_base} की जगह
+        {sim.new_emi.score_with} होगा।"
+    - label: RECOMMENDATION
+      unless: sim.new_emi.score_delta
+      text: "{sim.new_emi.tenure} के लिए {sim.new_emi.principal} उधार लेने पर EMI {sim.new_emi.emi} होगी, और EMI
+        आपकी आय का {sim.new_emi.eti_after} ले लेंगी।"
+    - label: RECOMMENDATION
+      text: "{sim.new_emi.alt_tenure} के लिए EMI {sim.new_emi.alt_emi} होगी।"
+    - label: RECOMMENDATION
+      when: =sim.new_emi.advice
+      text: "सैलरी की तारीख़ के ठीक बाद की EMI तारीख़ माँगें: पहली EMI {sim.new_emi.date.after_payday} को हो तो बाउंस
+        का ख़तरा {sim.new_emi.date.after_payday.risk} है, जबकि {sim.new_emi.date.in_30_days} को
+        {sim.new_emi.date.in_30_days.risk}।"
+  where_money:
+    - label: FACT
+      text: "पिछले महीने आपने {spend.total} ख़र्च किए। सबसे बड़े ख़र्च: {=spend.1.category} {spend.1.amount},
+        {=spend.2.category} {spend.2.amount} और {=spend.3.category} {spend.3.amount}।"
+    - label: FACT
+      when: drift.above_usual
+      text: "{=drift.category} पर ख़र्च आम महीने से {drift.above_usual} ज़्यादा चल रहा है: {drift.amount}, जबकि आम तौर
+        पर {drift.usual}।"
+    - label: FACT
+      when: merchant.2.amount
+      text: "सबसे ज़्यादा ख़र्च {=merchant.1.name} ({merchant.1.amount}) और {=merchant.2.name} ({merchant.2.amount})
+        पर हुआ।"
+    - label: RECOMMENDATION
+      rec: top
+  run_short:
+    - label: PREDICTION
+      when: =forecast.salaried
+      text: "{forecast.next_income} की अगली सैलरी से पहले आपके सैलरी खाते का बैलेंस {floor} से नीचे जाने की संभावना
+        {forecast.dip} है ({@confidence})।"
+    - label: PREDICTION
+      unless: =forecast.salaried
+      text: "अगली आमदनी (लगभग {forecast.next_income}) से पहले आपके मुख्य खाते का बैलेंस {floor} से नीचे जाने की
+        संभावना {forecast.dip} है ({@confidence})।"
+    - label: PREDICTION
+      when: bounce.m1.probability
+      text: "{bounce.m1.due} को {=bounce.m1.name} के {bounce.m1.amount} के भुगतान के बाउंस होने की संभावना
+        {bounce.m1.probability} है ({@label})।"
+    - label: PREDICTION
+      when: forecast.earmark.amount
+      text: "इसमें नए लोन के {forecast.earmark.amount} शामिल नहीं हैं, यह मानकर कि वे अपने काम में लगेंगे; अगर आप उन्हें
+        रखते हैं, तो बैलेंस नीचे जाने की संभावना {forecast.earmark.dip_if_kept} है ({@label})।"
+    - label: RECOMMENDATION
+      rec: top
+  score_change:
+    - label: FACT
+      when: change.score_delta
+      text: "{change.from_date} से आपका स्कोर {change.score_from} से {change.score_to} हुआ; अब यह {=change.band_to}
+        है।"
+    - label: FACT
+      unless: change.score_delta
+      text: "आपका स्कोर {change.score_to} पर ही है ({=change.band_to})।"
+    - label: FACT
+      when: change.new_data
+      text: "इसमें से {change.new_data} अंक उस डेटा से आए जो पहले दिखता नहीं था, आपके किसी काम से नहीं।"
+    - label: FACT
+      when: =change.reasons
+      text: "क्या बदला: {=change.reasons}।"
+    - label: PREDICTION
+      when: change.bounce.to
+      text: "EMI बाउंस का सबसे बड़ा ख़तरा {change.bounce.from} से {change.bounce.to} हुआ ({@confidence})।"
+    - label: RECOMMENDATION
+      rec: top
+  tradeoff:
+    - label: RECOMMENDATION
+      rec: target
+    - label: RECOMMENDATION
+      tradeoff: target
+  summary:
+    - label: FACT
+      text: "आपका हेल्थ स्कोर {score}/100 है ({=band}); सबसे बड़ी कमज़ोरी {=top_drag} है।"
+    - label: FACT
+      when: revolving
+      text: "आपके कार्ड पर {revolving} का बकाया चल रहा है, और EMI आपकी आय का {emi_to_income} ले रही हैं।"
+    - label: FACT
+      unless: revolving
+      text: "आप अपनी आय का {savings_rate} बचाते हैं, और EMI इसका {emi_to_income} ले रही हैं।"
+    - label: RECOMMENDATION
+      rec: top
+
+recs:
+  link_account: "अपने {=.institution} कार्ड का स्टेटमेंट लिंक करें ताकि हम उसका बकाया देख सकें: तब हम {.known} में से
+    {.linked_after} खाते देख पाएँगे, अभी {.linked_before}।"
+  pay_down_card: "बचत से {.amount} लगाकर कार्ड का बकाया चुकाएँ, फिर कार्ड ऑटोपे को पूरे स्टेटमेंट पर सेट करें, और
+    {.cushion} कुशन के तौर पर रखें। साल भर बाद स्कोर: {.score_base} की जगह {.score_with}।"
+  pay_down_card.partial: "बचत से {.amount} लगाकर कार्ड का बकाया घटाएँ, और {.cushion} कुशन के तौर पर रखें। साल भर बाद
+    स्कोर: {.score_base} की जगह {.score_with}।"
+  redirect_sweep: "आपका {.amount} का मासिक ट्रांसफ़र बचत की जगह कार्ड में भेजें, जब तक कार्ड साफ़ न हो: साल भर बाद स्कोर
+    {.score_base} की जगह {.score_with} होगा।"
+  auto_sweep: "सैलरी के दिन {.amount} अतिरिक्त कार्ड में भेजें: साल भर बाद स्कोर {.score_base} की जगह {.score_with}
+    होगा।"
+  auto_sweep.savings: "सैलरी के दिन {.amount} बचत में डालें: साल भर बाद स्कोर {.score_base} की जगह {.score_with}
+    होगा।"
+  pay_down_card.flat: "बचत से {.amount} लगाकर कार्ड का बकाया चुकाएँ, फिर कार्ड ऑटोपे को पूरे स्टेटमेंट पर सेट करें, और
+    {.cushion} कुशन के तौर पर रखें: साल भर में {.card_interest_saved} का कार्ड-ब्याज बचेगा।"
+  redirect_sweep.flat: "आपका {.amount} का मासिक ट्रांसफ़र बचत की जगह कार्ड में भेजें, जब तक कार्ड साफ़ न हो: साल भर में
+    {.card_interest_saved} का कार्ड-ब्याज बचेगा।"
+  auto_sweep.flat: "सैलरी के दिन {.amount} अतिरिक्त कार्ड में भेजें: साल भर में {.card_interest_saved} का कार्ड-ब्याज
+    बचेगा।"
+  auto_sweep.savings.flat: "सैलरी के दिन {.amount} बचत में डालें: साल भर बाद आपकी आपातकालीन बचत {.buffer_12m_base} की
+    जगह {.buffer_12m_with} के ख़र्च जितनी होगी।"
+  cancel_overlapping_subs: "{=.keep} रखें और {=.cancel} बंद करें: इससे हर महीने {.amount} बचेंगे, साल भर में
+    {.annual}।"
+  change_emi_tenure: "सिर्फ़ विचार के लिए: {=.loan} लोन को {.extra_months} बढ़ाने से EMI {.old_emi} से घटकर
+    {.new_emi} होगी, पर {.extra_interest} ज़्यादा ब्याज लगेगा।"
+
+tradeoffs:
+  link_account: "इसमें पैसों का कोई ट्रेड-ऑफ़ नहीं: लिंक करने से हम बस {.known} में से {.linked_after} खाते देख
+    पाएँगे।"
+  pay_down_card: "ट्रेड-ऑफ़: अभी बचत से {.amount} निकल जाएँगे, और अगर आप फिर हर बिल का लगभग {.pay_share} ही भरने लगे,
+    तो बकाया {.rebuild_months} में फिर {.rebuild_to} तक पहुँच जाएगा, और बचत भी जा चुकी होगी।"
+  pay_down_card.fallback: "ट्रेड-ऑफ़: अभी बचत से {.amount} निकल जाएँगे।"
+  redirect_sweep: "ट्रेड-ऑफ़: हर महीने के {.amount} बचत में नहीं जाएँगे, इसलिए साल भर में {.savings_interest_lost} का
+    बचत-ब्याज छूटेगा, जबकि {.card_interest_saved} का कार्ड-ब्याज बचेगा।"
+  redirect_sweep.fallback: "ट्रेड-ऑफ़: कार्ड साफ़ होने तक हर महीने के {.amount} बचत में नहीं जाएँगे।"
+  auto_sweep: "ट्रेड-ऑफ़: सैलरी के बीच हाथ में कम पैसा रहेगा; EMI बाउंस का सबसे बड़ा ख़तरा {.bounce_before} से
+    {.bounce_after} होगा।"
+  auto_sweep.fallback: "ट्रेड-ऑफ़: हर सैलरी के बाद खाते में {.amount} कम रहेंगे।"
+  cancel_overlapping_subs: "ट्रेड-ऑफ़ बस इतना कि वे ऐप नहीं रहेंगे; बचत हर महीने {.amount} की है।"
+  change_emi_tenure: "ट्रेड-ऑफ़: अभी छोटी EMI ({.old_emi} की जगह {.new_emi}), पर {.extra_interest} ज़्यादा ब्याज, और
+    {.extra_months} ज़्यादा समय तक कर्ज़।"

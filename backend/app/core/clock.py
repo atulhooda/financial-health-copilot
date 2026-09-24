@@ -6,6 +6,8 @@ datetime.now()/date.today()/time.time() calls outside this module.
 from __future__ import annotations
 
 import datetime as _dt
+import time as _time
+from collections.abc import Callable
 from typing import Protocol
 
 from app.core.dates import IST
@@ -60,3 +62,9 @@ def get_clock() -> Clock:
 def set_clock(clock: Clock) -> None:
     global _default
     _default = clock
+
+
+def stopwatch() -> Callable[[], int]:
+    """Latency measurement only (monotonic, not business time): returns a function giving elapsed milliseconds."""
+    start = _time.perf_counter()
+    return lambda: int(round((_time.perf_counter() - start) * 1000))

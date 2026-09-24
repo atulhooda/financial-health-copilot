@@ -211,6 +211,19 @@ def _debt_growth(cards: list[CardMetrics], income_now: int, recurring: list[Recu
 
 
 # ---- engine --------------------------------------------------------------------------------------
+def top_merchants(view: View, n: int = 10, days: int = 30) -> list[dict]:
+    """Largest spend by merchant over the last `days` (FACT). People are never listed, only merchants, and
+    obligations (EMIs, rent) are left out: they already show as categories and recurring items."""
+    tx = view.txns.filter((pl.col("date") > view.as_of - dt.timedelta(days=days)) & pl.col("spend")
+                          & (pl.col("direction") == "debit") & (pl.col("counterparty_type") == "merchant")
+                          & ~pl.col("category").is_in(["emi", "rent"]))
+    rows = (tx.group_by("merchant_key").agg(pl.col("amount").sum().alias("amount"), pl.len().alias("count"),
+                                            pl.col("merchant_name").last(), pl.col("category").mode().first())
+            .sort(["amount", "merchant_key"], descending=[True, False]).head(n))
+    return [{"merchant_key": r["merchant_key"], "name": r["merchant_name"], "category": r["category"],
+             "amount_paise": int(r["amount"]), "count": int(r["count"])} for r in rows.iter_rows(named=True)]
+
+
 def compute_metrics(view: View, recurring: list[RecurringItem] | None = None) -> Metrics:
     tx = view.txns
     recurring = detect_recurring(view) if recurring is None else recurring

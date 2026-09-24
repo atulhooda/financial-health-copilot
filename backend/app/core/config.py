@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     llm_model: str | None = None
     llm_base_url: str | None = None
     llm_api_key: str | None = None
+    llm_timeout_s: float = 20.0  # per LLM call (COPILOT.md §2)
+    llm_effort: str | None = None  # Anthropic output_config.effort (low | medium | high); unset = model default
     demo_mode: bool = False
     seed: int = 20260920
     clock: str | None = None  # YYYY-MM-DD -> FixedClock

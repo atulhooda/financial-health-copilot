@@ -1,0 +1,73 @@
+# Copilot lexicons (docs/COPILOT.md). Deterministic: the validator, language detection and templates read them,
+# and tests pin their behaviour.
+
+language:
+  # Hinglish = Latin script with Hindi words. Two hits make a message Hinglish (one if it is 3 words or fewer).
+  # English homographs (to, me, main, par, do, is, hi, the) are deliberately left out.
+  hinglish_words: [hai, hain, ho, hoon, hun, hu, kya, kyu, kyun, kyon, kaise, kaisa, kaisi, kitna, kitni, kitne, kahan,
+    kab, kaun, kaunsa, konsa, mera, meri, mere, mujhe, mai, hum, hamara, humara, aap, aapka, aapki, aapke, apna, apni,
+    apne, tum, tumhara, ka, ki, ke, ko, se, mein, pe, ne, le, li, liya, liye, diya, nahi, nahin, bhi, toh, abhi, kar,
+    karna, karu, karoon, karun, karein, kare, karo, raha, rahi, rahe, gaya, gayi, gaye, lena, loon, lu, sakta, sakti,
+    sakte, chahiye, chahta, chahti, chahte, wala, wali, wale, paisa, paise, kharcha, kharch, bacha, bache, bachat,
+    bachega, padega, padegi, jayega, jayegi, hoga, hogi, lekin, aur, kuch, sab, bahut, zyada, jyada, thoda, accha,
+    acha, theek, thik, batao, bataiye, samjhao, kyunki, isliye, agar, daalun, daalu, daal, fayda, nuksaan, mahina,
+    mahine, saal, rupaye, udhaar, karza, karz, yaar, bhai, kharab, pareshan, dikkat, kami, badla, badal, gira, badha,
+    ghata, jaan, jeena, marna, dimaag, bata, sahi, galat, matlab, wajah, kaam, chalega, kam, jaldi]
+  min_hits: 2
+
+confidence:
+  # A PREDICTION states the forecast's confidence LABEL next to a confidence word (COPILOT.md §7, PRED_NO_CONF).
+  labels:
+    High: {en: [high], hinglish: [high, zyada, jyada, uncha], hi: [ऊँचा, ऊंचा, उच्च, ज़्यादा, high]}
+    Medium: {en: [medium, moderate], hinglish: [medium, madhyam], hi: [मध्यम, medium]}
+    Low: {en: [low], hinglish: [low, kam], hi: [कम, निम्न, low]}
+  nouns: {en: [confidence], hinglish: [confidence, bharosa, bharosaa, yakeen, yakin], hi: [भरोसा, विश्वास, यकीन, confidence]}
+  # CONF_AS_PCT: a percentage glued to any of these reads as "we are N% sure", which the backtest does not measure.
+  pct_words: [confident, confidence, sure, certain, certainty, accurate, accuracy, pakka, bharosa, bharosaa, yakeen,
+    yakin, भरोसा, विश्वास, यकीन, निश्चित, निश्चितता, पक्का, आत्मविश्वास, सटीक]
+
+assumptions:
+  # How a RECOMMENDATION states an assumption with no number (Phase 5 item 8). Any phrase counts; matching is
+  # case-insensitive. Numeric assumptions are stated by their number (e.g. "3% a year").
+  pay_in_full_after:
+    en: [in full, full statement, full amount, full bill]
+    hinglish: [poora bill, pura bill, poori payment, puri payment, full bill, full amount, full payment, in full]
+    hi: [पूरा बिल, पूरे बिल, पूरी राशि, पूरा भुगतान, पूरा पेमेंट]
+  lender_approval:
+    en: [approval, approve]
+    hinglish: [approval, manzoori, manjuri, approve]
+    hi: [मंज़ूरी, मंजूरी, अनुमति]
+  unswept_spend_share:
+    en: [half]
+    hinglish: [aadha, aadhe, aadhi, half]
+    hi: [आधा, आधे, आधी]
+
+intents:
+  # Deterministic intents for LLM_PROVIDER=none and the template fallback (COPILOT.md §9). Checked in this order;
+  # summary is the default. Phrases match on whole words, any language.
+  afford_emi:
+    needs_amount: true
+    words: [afford, emi, loan, finance it, buy on, instalment, installment, le sakta, le sakti, le loon, le lu, kharid,
+      khareed, kharidun, emi pe, emi par, loan le, ले सकता, ले सकती, ले लूँ, खरीद, ख़रीद, खरीदूँ, किस्त, लोन]
+  score_change:
+    needs: [score, स्कोर]
+    words: [change, changed, changing, drop, dropped, fell, fall, down, lower, went, why, kyun, kyu, kyon, gira,
+      badla, badal, kam, ghata, क्यों, गिरा, बदला, बदल, कम, घटा]
+  tradeoff:
+    words: [trade-off, tradeoff, trade off, catch, downside, worth it, benefit, fayda, faayda, nuksaan, nuksan,
+      kya milega, फ़ायदा, फायदा, नुकसान, नुक़सान, ट्रेड-ऑफ़, ट्रेड ऑफ]
+  run_short:
+    words: [run short, running short, run out, running out, short before, enough money, enough till, last till, bounce,
+      bounced, before payday, before salary, month end, kam padega, kam padegi, kam pad, khatam, salary se pehle,
+      salary tak, chalega, कम पड़ेगा, कम पड़ेंगे, कम पड़, ख़त्म, खत्म, सैलरी से पहले, तनख़्वाह से पहले, बाउंस, चलेगा]
+  where_money:
+    words: [where, spending, spend, spent, expenses, expense, going, kahan, kidhar, kharcha, kharch, ja raha, कहाँ,
+      कहां, खर्च, ख़र्च, जा रहा]
+  summary:
+    words: [overall, doing, summary, health, kaisa, kaisi, कैसा, कैसी]
+tradeoff_targets:  # which recommendation a trade-off question is about; first match wins, else the top one
+  redirect_sweep: [transfer, monthly transfer, redirect, wala transfer, ट्रांसफर, ट्रांसफ़र]
+  cancel_overlapping_subs: [subscription, subscriptions, netflix, prime, hotstar, ott, सब्सक्रिप्शन]
+  auto_sweep: [sweep, auto-save, autosave, auto save]
+  change_emi_tenure: [tenure, extend, extension, lamba, अवधि]
+  pay_down_card: [clear, clearing, pay off, card, savings, bachat, कार्ड, बचत]

@@ -77,20 +77,24 @@ Response: an envelope whose `recommendations[0]` is the simulated action (`rank:
 
 ### POST `/v1/ask[?debug=true]`
 Body: `{ "message": "Kya main ₹60,000 ka phone 12 months ki EMI pe le sakta hoon?" }`
-Response:
+Response (the fields `Copilot.ask` returns since Phase 5, grouped by label; COPILOT.md §1):
 ```jsonc
 {
-  "user_id": "demo-a", "snapshot_id": "snap_0004", "language": "hinglish",
+  "ask_id": "ask_…", "user_id": "demo-a", "as_of": "2026-11-02", "language": "hinglish",
   "path": "llm|llm_retry|template|guard",
+  "fallback_reason": null | "validator" | "tool_cap" | "no_respond" | "refusal" | "llm_error: …",
   "guard": null | "scope" | "distress" | "distress_checkin",
-  "checkin": null | "one gentle line (tier 2 only)",
-  "facts":           [{ "text": "...", "refs": ["F3","U1"] }],
-  "predictions":     [{ "text": "...", "refs": ["P1","P2"], "confidence": Confidence }],
-  "recommendations": [{ "text": "...", "refs": ["R1","A1"], "impact": Impact | null }],
-  "helpline": null | { "name": "...", "number": "...", "hours": "..." },
+  "checkin": null | "one gentle line with the helpline (tier 2 only)",
+  "message": null | "the guard response (tier 1 or scope)",
+  "suggestions": [] /* scope only: in-scope questions to ask instead */,
+  "facts":           [{ "text": "...", "refs": ["F21","F26"] }],
+  "predictions":     [{ "text": "...", "refs": ["P7","F47","F48"] }],
+  "recommendations": [{ "text": "...", "refs": ["R1","A1"] }],
+  "sources": { "R1": { "kind": "recommendation", "display": "₹5,415", "desc": "the new EMI" } /* every cited id */ },
   "trace": null | { /* COPILOT.md §10 */ }
 }
 ```
+The helpline sits inside `checkin` / `message` (Tele-MANAS, `config/helplines.yaml`). Every number in `text` is one of the cited `sources`.
 
 ### POST `/v1/ingest/{source}`: `source ∈ aa | statement | sms | manual`
 - `aa`: the AA mock envelope (SPEC §4).
