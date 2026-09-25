@@ -11,8 +11,11 @@ make test
 
 cd backend
 uv run hisaab ask --user demo-a "Kya main ₹60,000 ka phone 12 months ki EMI pe le sakta hoon?"   # --debug for the trace
-uv run hisaab eval-copilot     # 30-question eval -> docs/COPILOT_EVAL.md
+uv run hisaab eval-copilot --candidates   # 30-question eval per candidate model -> docs/COPILOT_EVAL.md
 ```
+
+Keys: copy `backend/.env.example` to `backend/.env` (gitignored) and fill it in; never commit keys or paste them into
+chat or logs. `make hooks` installs a pre-push secret scan; `make secret-scan` runs it by hand.
 
 The copilot answers from templates when `LLM_PROVIDER=none` (the default). For a model, set `LLM_PROVIDER=anthropic`
 (or `openai_compat` with `LLM_BASE_URL`), `LLM_MODEL` and `LLM_API_KEY`; see [docs/COPILOT.md](docs/COPILOT.md).

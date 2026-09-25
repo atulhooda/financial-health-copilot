@@ -15,7 +15,7 @@ from app.copilot.tools import ToolContext
 from app.core.config import load_yaml
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
-SLOT = re.compile(r"\{([=@]?)(\.?[\w.]+)\}")
+SLOT = re.compile(r"\{([=@]?)(\.?[\w.:]+)\}")
 BAND_KEYS = ("band", "change.band_to", "change.band_from")
 
 
@@ -57,12 +57,19 @@ def _text_slot(ctx: ToolContext, key: str) -> str | None:
     return str(v)
 
 
-def _confidence(ctx: ToolContext, form: str, refs: list[str]) -> str | None:
-    conf = ctx.reg.confidence
-    if not conf:
+def _confidence(ctx: ToolContext, form: str, refs: list[str], prefix: str | None = None) -> str | None:
+    """The forecast's confidence ({@confidence} full, {@label} short), or a simulation's own label ({@label:<prefix>},
+    {@label:.} for the statement's prefix)."""
+    if prefix is not None:
+        g = ctx.texts.get(f"{prefix}.group")
+        raw = ctx.reg.group_confidence.get(g) if g else None
+        form = "short"
+    else:
+        raw = (ctx.reg.confidence or {}).get("label")
+    if not raw:
         return None
     t = templates(ctx.language)["confidence"]
-    label = _names()["confidence_labels"][conf["label"]][ctx.language]
+    label = _names()["confidence_labels"][raw][ctx.language]
     if form == "full":
         filled = _fill(t["full"].replace("{label}", label), ctx, None)
         if filled is not None:
@@ -79,7 +86,9 @@ def _fill(text: str, ctx: ToolContext, prefix: str | None) -> tuple[str, list[st
     for m in SLOT.finditer(text):
         sigil, key = m.group(1), _key(m.group(2), prefix)
         if sigil == "@":
-            val = _confidence(ctx, "full" if key == "confidence" else "short", refs)
+            name, _, of = m.group(2).partition(":")
+            of = (prefix if of == "." else of) or None
+            val = _confidence(ctx, "full" if name == "confidence" else "short", refs, of)
         elif sigil == "=":
             val = _text_slot(ctx, key)
         else:
@@ -103,9 +112,11 @@ def _truthy(ctx: ToolContext, cond: str) -> bool:
 
 
 def _with_assumptions(ctx: ToolContext, text: str, refs: list[str]) -> tuple[str, list[str]]:
-    """Phase 5 item 8: a RECOMMENDATION states every assumption of the simulation whose numbers it quotes."""
+    """Phase 5 item 8: a statement quoting a simulation's numbers (a RECOMMENDATION, or a what-if's conditional
+    PREDICTION) states every assumption of that simulation."""
     t = templates(ctx.language)
-    groups = {ctx.reg.entries[r].group for r in refs if ctx.reg.entries[r].kind == "recommendation"} - {None}
+    groups = {ctx.reg.entries[r].group for r in refs
+              if ctx.reg.entries[r].kind in ("recommendation", "prediction")} - {None}
     items = []
     for a in ctx.reg.assumptions():
         if a.group not in groups:
@@ -126,8 +137,12 @@ def _rec_variants(ctx: ToolContext, prefix: str, table: dict) -> list[str]:
     keys = []
     if rtype == "pay_down_card" and not ctx.texts.get(f"{prefix}.clears", True):
         keys.append("pay_down_card.partial")
-    if rtype == "auto_sweep" and not ctx.texts.get(f"{prefix}.to_card", False):
-        keys.append("auto_sweep.savings")
+    if rtype == "auto_sweep":
+        to_card = ctx.texts.get(f"{prefix}.to_card", False)
+        if ctx.texts.get(f"{prefix}.per_payout"):  # irregular income: a share of each payout (fix 6)
+            keys.append("auto_sweep.payout" if to_card else "auto_sweep.savings.payout")
+        if not to_card:
+            keys.append("auto_sweep.savings")
     keys.append(rtype)
     if f"{prefix}.score_delta" not in ctx.reg.by_key:  # the score doesn't move: lead with the money instead
         keys = [f"{k}.flat" for k in keys] + keys
@@ -144,11 +159,13 @@ def render(intent: str, ctx: ToolContext, target: str | None = None) -> list[dic
             continue
         if "unless" in spec and _truthy(ctx, spec["unless"]):
             continue
-        filled = None
+        filled, label = None, spec["label"]
         if "rec" in spec or "tradeoff" in spec:
             prefix = "rec.1" if spec.get("rec") == "top" else target or "rec.1"
             if f"{prefix}.type" not in ctx.texts:
                 continue
+            # D10: label by who proposed it; a what-if Hisaab only offers to explore is a conditional PREDICTION
+            label = "RECOMMENDATION" if ctx.texts.get(f"{prefix}.proposed", True) else "PREDICTION"
             table = t["recs"] if "rec" in spec else t["tradeoffs"]
             for variant in _rec_variants(ctx, prefix, table):
                 filled = _fill(variant, ctx, prefix)
@@ -159,9 +176,9 @@ def render(intent: str, ctx: ToolContext, target: str | None = None) -> list[dic
         if filled is None:
             continue
         text, refs = filled
-        if spec["label"] == "RECOMMENDATION":
+        if label in ("RECOMMENDATION", "PREDICTION"):
             text, refs = _with_assumptions(ctx, text, refs)
         if text[:1].isascii() and text[:1].islower():
             text = text[0].upper() + text[1:]
-        statements.append({"label": spec["label"], "text": text, "refs": list(dict.fromkeys(refs))})
+        statements.append({"label": label, "text": text, "refs": list(dict.fromkeys(refs))})
     return statements

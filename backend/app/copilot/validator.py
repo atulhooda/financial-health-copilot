@@ -6,7 +6,7 @@ failed `respond`, so the details say what to fix.
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 from app.copilot import numbers
 from app.copilot.language import LANGUAGES, TOKEN, hinglish_hits, script_fits
@@ -15,6 +15,7 @@ from app.core.config import load_yaml
 from app.core.pii import find_regex_pii
 
 LABELS = ("FACT", "PREDICTION", "RECOMMENDATION")
+SCRIPT = {"en": "latin", "hinglish": "latin", "hi": "devanagari"}  # only a script mismatch blocks (fix 7)
 MAX_STATEMENTS = 8
 MAX_TEXT = 400
 ALLOWED_KINDS = {
@@ -37,6 +38,7 @@ class Issue:
 class Verdict:
     ok: bool
     errors: list[Issue]
+    notes: list[Issue] = field(default_factory=list)  # soft findings (e.g. English vs Hinglish style)
 
     def tool_result(self) -> dict:
         return {"ok": self.ok, "errors": [asdict(e) for e in self.errors]}
@@ -109,6 +111,16 @@ def _conf_as_pct(text: str) -> bool:
     return bool(re.search(rf"{pct}\s*(?:{words})", t) or re.search(rf"(?:{words}){glue}\s*[:=\-–—]?\s*{pct}", t))
 
 
+def _states_condition(text: str, language: str) -> bool:
+    low = numbers.normalise(text).lower()
+    for p in {*load_yaml("copilot")["conditional"].get(language, []), *load_yaml("copilot")["conditional"]["en"]}:
+        p = numbers.normalise(p).lower()
+        tail = "" if re.search(r"[\u0900-\u097F]", p) else r"(?![\w])"
+        if re.search(rf"(?<![\w]){re.escape(p)}{tail}", low):
+            return True
+    return False
+
+
 def _stated(e: Entry, text: str, resolved: set[str], language: str) -> bool:
     """An assumption is stated by its number (resolved to it) or, for flags and shares, by one of its phrases."""
     if e.id in resolved:
@@ -122,14 +134,17 @@ def validate(candidate: object, reg: Registry, language: str) -> Verdict:
     if errs:
         return Verdict(False, errs)
     assert isinstance(candidate, dict)
-    if candidate["language"] != language:
+    notes: list[Issue] = []  # soft: reported by the eval, never a block
+    if SCRIPT[candidate["language"]] != SCRIPT[language]:
         errs.append(Issue(None, "LANG_MISMATCH", f"the user wrote in {language}; reply with language '{language}'"))
+    elif candidate["language"] != language:
+        notes.append(Issue(None, "LANG_STYLE", f"the user wrote {language}; the reply says {candidate['language']}"))
     sts = candidate["statements"]
     texts = " ".join(st["text"] for st in sts)
     if language == "hinglish" and hinglish_hits(texts) < 2:
-        errs.append(Issue(None, "LANG_MISMATCH", "reply in Hinglish (Hindi words in Latin script), as the user wrote"))
+        notes.append(Issue(None, "LANG_STYLE", "the user wrote Hinglish; the reply reads as English"))
     if language == "en" and hinglish_hits(texts) > 1:
-        errs.append(Issue(None, "LANG_MISMATCH", "reply in English, as the user wrote"))
+        notes.append(Issue(None, "LANG_STYLE", "the user wrote English; the reply reads as Hinglish"))
 
     rec_statements: list[tuple[int, dict, set[str]]] = []  # (index, statement, entry ids its numbers resolved to)
     for i, st in enumerate(sts, 1):
@@ -165,30 +180,39 @@ def validate(candidate: object, reg: Registry, language: str) -> Verdict:
             if e is not None and e.kind not in ALLOWED_KINDS[label]:
                 allowed = ", ".join(sorted(ALLOWED_KINDS[label]))
                 errs.append(Issue(i, "LABEL_KIND", f"{r} is a {e.kind} ({e.desc}); a {label} may only cite {allowed}"
-                                  + (". Projected and simulated numbers are RECOMMENDATIONs" if e.kind ==
+                                  + (". The impact of an action Hisaab proposes is a RECOMMENDATION" if e.kind ==
                                      "recommendation" else "")
-                                  + (". Forecast numbers are PREDICTIONs" if e.kind == "prediction" else "")))
+                                  + (". Forecasts and what-ifs the user asks about are PREDICTIONs" if e.kind ==
+                                     "prediction" else "")))
+        what_ifs = {reg.entries[x].group for x in resolved if reg.entries[x].group in reg.what_if_groups}
         if label == "PREDICTION":
-            want = (reg.confidence or {}).get("label")
+            groups = sorted(what_ifs)
+            want = reg.group_confidence.get(groups[0]) if groups else (reg.confidence or {}).get("label")
             said = _confidence_label_stated(text, language)
             if want is None:
                 errs.append(Issue(i, "PRED_NO_CONF", "no forecast confidence in this turn; call `forecast` first"))
             elif said is None:
-                errs.append(Issue(i, "PRED_NO_CONF", f"state the forecast's confidence label: {want} confidence"))
+                errs.append(Issue(i, "PRED_NO_CONF", f"state the confidence label: {want} confidence"))
             elif said != want:
-                errs.append(Issue(i, "PRED_NO_CONF", f"the forecast's confidence is {want}, not {said}"))
+                errs.append(Issue(i, "PRED_NO_CONF", f"the confidence is {want}, not {said}"))
+            if what_ifs and not _states_condition(text, language):
+                errs.append(Issue(i, "CONDITION_MISSING", "a what-if is a conditional PREDICTION: phrase it with its "
+                                                          "condition, e.g. 'If you take the 12-month EMI, …'"))
         if label == "RECOMMENDATION":
             if not any(reg.entries[x].kind == "recommendation" for x in resolved):
-                errs.append(Issue(i, "REC_NO_IMPACT", "a RECOMMENDATION must state a simulated impact: a number "
-                                                      "from a recommendation-kind entry (R…), cited in refs"))
+                errs.append(Issue(i, "REC_NO_IMPACT", "a RECOMMENDATION must state the simulated impact of an action "
+                                                      "Hisaab proposes: a recommendation-kind number (R…), cited"))
+        if label == "RECOMMENDATION" or what_ifs:
             rec_statements.append((i, st, resolved))
 
-    # Phase 5 item 8: a RECOMMENDATION quoting a simulated number states (and cites) that simulation's assumptions
+    # Phase 5 item 8: a statement quoting a simulated number (a RECOMMENDATION, or a what-if's conditional
+    # PREDICTION) states and cites that simulation's assumptions
     for i, st, resolved in rec_statements:
-        groups = {reg.entries[x].group for x in resolved if reg.entries[x].kind == "recommendation"} - {None}
+        groups = {reg.entries[x].group for x in resolved
+                  if reg.entries[x].kind in ("recommendation", "prediction")} - {None}
         for a in reg.assumptions():
             if a.group in groups and not (a.id in st["refs"] and _stated(a, st["text"], resolved, language)):
                 how = f"'{a.display(language)}'" if a.numeric else "in words"
                 errs.append(Issue(i, "ASSUMPTION_NOT_CITED",
                                   f"this simulation assumes: {a.desc}. State it here ({how}) and cite {a.id} in refs"))
-    return Verdict(not errs, errs)
+    return Verdict(not errs, errs, notes)

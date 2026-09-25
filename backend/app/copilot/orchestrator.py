@@ -37,6 +37,7 @@ from app.pipeline.categorise.model import Categoriser
 
 MAX_TOOL_CALLS = 6
 MAX_ATTEMPTS = 2  # first draft + one retry
+MIN_CALL_S = 0.5  # less time than this left before the deadline: don't start another LLM call
 LANGUAGE_NAMES = {"en": "English", "hi": "Hindi, written in Devanagari script",
                   "hinglish": "Hinglish: Hindi words written in Latin script, the way the user wrote"}
 
@@ -57,6 +58,8 @@ class Answer:
     fallback_reason: str | None = None  # why an LLM turn ended on templates
     attempts: list[dict] = field(default_factory=list)  # [{attempt, ok, errors}]
     final_errors: list[dict] = field(default_factory=list)  # the delivered answer, re-validated: always empty
+    style_notes: list[str] = field(default_factory=list)  # soft: English vs Hinglish style mismatches (fix 7)
+    usage: dict = field(default_factory=lambda: {"calls": 0, "input_tokens": 0, "output_tokens": 0})
     tool_calls: int = 0
     latency_ms: int = 0
     as_of: str | None = None
@@ -80,14 +83,16 @@ Data is as of {as_of or "the latest snapshot"}.
 
 How to answer:
 1. Call the data tools you need, then answer ONLY by calling `respond`. Use nothing but what the tools return.
-2. `respond` takes 1-8 statements. Each is one claim with a label:
+2. `respond` takes 1-8 statements. Each is one claim with a label; each tool result says how to label it:
    - FACT: observed data (registry ids starting F, or U for numbers the user typed).
-   - PREDICTION: forecast numbers (ids starting P). Every PREDICTION names the forecast's confidence label, e.g. \
-"Medium confidence", optionally with its reason line ("the band held on 64% of past days, target 80%"). Never \
-write confidence as a percentage ("80% confident" is wrong).
-   - RECOMMENDATION: an action or what-if. It must quote at least one simulated number (ids starting R), and it \
-must state every assumption of that simulation (ids starting A in the same result), in words or with its number, \
-citing their ids. Projected scores are always RECOMMENDATION numbers, never FACTs.
+   - PREDICTION: the forecast (ids starting P), and any what-if the user asks about (a new EMI, delaying a \
+purchase, a longer loan tenure). Phrase a what-if with its condition ("If you take the 12-month EMI, …"). Every \
+PREDICTION names its confidence label, e.g. "Medium confidence", optionally with the reason line ("the band held \
+on 64% of past days, target 80%"). Never write confidence as a percentage ("80% confident" is wrong).
+   - RECOMMENDATION: only an action Hisaab proposes (from list_recommendations, or simulate_action of one of those \
+action types). It must quote at least one simulated number (ids starting R).
+   - Any statement that quotes a simulated number must also state every assumption of that simulation (ids \
+starting A in the same result), in words or with its number, citing their ids. Projected scores are never FACTs.
 3. Numbers: copy each one exactly from a `display` string (you may round to at least 2 significant figures, e.g. \
 ₹1,18,540 as ₹1.19 lakh). Digits only, never number words. Never compute a number yourself (no sums, differences \
 or percentages of your own), and write no other numbers (no list numbering). Every number you write needs its id \
@@ -102,11 +107,15 @@ them.
 
 class Copilot:
     def __init__(self, session_factory: sessionmaker[Session], categoriser: Categoriser | None, llm: LLMClient,
-                 clock: Clock | None = None, debug: bool | None = None, persist: bool = True):
+                 clock: Clock | None = None, debug: bool | None = None, persist: bool = True,
+                 deadline_s: float | None = None):
         self.sf, self.categoriser, self.llm = session_factory, categoriser, llm
         self.clock = clock or get_clock()
-        self.debug = get_settings().copilot_debug_trace if debug is None else debug  # COPILOT_DEBUG_TRACE=1
+        settings = get_settings()
+        self.debug = settings.copilot_debug_trace if debug is None else debug  # COPILOT_DEBUG_TRACE=1
         self.persist = persist
+        self.deadline_s = settings.copilot_deadline_s if deadline_s is None else deadline_s  # fix 8: per question
+        self.call_timeout_s = settings.llm_timeout_s
 
     # ---- public -----------------------------------------------------------------------------------------------
     def ask(self, user_id: str, text: str, debug: bool | None = None) -> Answer:
@@ -153,13 +162,14 @@ class Copilot:
                        "guard": g.name, "intent": intent.name, "tool_calls": [], "attempts": []}
         statements = None
         if self.llm.provider != "none":
-            statements = self._llm_turn(ans, ctx, text, masker, trace)
+            statements = self._llm_turn(ans, ctx, text, masker, trace, elapsed)
         if statements is None:
             statements = self._template_turn(ans, ctx, intent, trace)
             ans.path = "template"
         if statements:
             final = validate({"language": language, "statements": statements}, reg, language)
             ans.final_errors = [dataclasses.asdict(e) for e in final.errors]
+            ans.style_notes = [n.detail for n in final.notes]
         ans.statements = [{**st, "text": masker.rehydrate(st["text"])} for st in statements]
         cited = dict.fromkeys(r for st in statements for r in st["refs"])
         ans.sources = {r: {"kind": e.kind, "display": e.display(language), "desc": masker.rehydrate(e.desc)}
@@ -173,7 +183,8 @@ class Copilot:
         return ans
 
     # ---- LLM loop ---------------------------------------------------------------------------------------------
-    def _llm_turn(self, ans: Answer, ctx: ToolContext, text: str, masker: Masker, trace: dict) -> list[dict] | None:
+    def _llm_turn(self, ans: Answer, ctx: ToolContext, text: str, masker: Masker, trace: dict,
+                  elapsed) -> list[dict] | None:
         llm = MaskingLLM(self.llm, masker)
         system = system_prompt(ctx.language, ctx.payload.get("as_of"))
         messages: list[dict] = [{"role": "user", "content": text}]
@@ -181,10 +192,17 @@ class Copilot:
             (masker.mask(system) + "\n" + masker.mask(text, free_text=True)).encode()).hexdigest()
         tools = [*TOOL_SPECS, RESPOND_SPEC]
         while True:
+            remaining = self.deadline_s - elapsed() / 1000
+            if remaining < MIN_CALL_S:  # fix 8: past the per-question deadline, serve the template
+                return self._fallback(ans, "deadline")
             try:
-                reply = llm.chat(system, messages, tools, "any")
+                reply = llm.chat(system, messages, tools, "any", timeout=min(self.call_timeout_s, remaining))
             except (LLMError, LLMUnavailable) as e:
-                return self._fallback(ans, f"llm_error: {e}"[:200])
+                late = elapsed() / 1000 >= self.deadline_s - MIN_CALL_S
+                return self._fallback(ans, "deadline" if late else f"llm_error: {e}"[:200])
+            ans.usage["calls"] += 1
+            for k in ("input_tokens", "output_tokens"):
+                ans.usage[k] += int(reply.usage.get(k) or 0)
             if reply.stop_reason == "refusal":
                 return self._fallback(ans, "refusal")
             messages.append({"role": "assistant", "reply": reply})
@@ -341,6 +359,7 @@ def run_plan(ctx: ToolContext, intent: Intent) -> str | None:
         if slots.get("annual_rate_pct") is not None:
             params["annual_rate_pct"] = slots["annual_rate_pct"]
         run_tool(ctx, "simulate_action", {"action": {"type": "new_emi", "params": params}})
+        run_tool(ctx, "list_recommendations", {"limit": 1})  # what Hisaab itself proposes (a RECOMMENDATION)
     elif name == "where_money":
         run_tool(ctx, "get_spending", {"period": "last_30d", "top_n": 6})
         run_tool(ctx, "get_recurring", {"kind": "all"})

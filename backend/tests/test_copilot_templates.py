@@ -37,13 +37,47 @@ def test_every_template_statement_passes(copilot_world, categoriser, language):
             statements = render(intent, ctx, run_plan(ctx, Intent(intent, slots)))
             if intent == "score_change" and diff is None:
                 assert all(s["label"] == "RECOMMENDATION" for s in statements)  # nothing to compare with
+            elif intent == "tradeoff" and not recs:
+                assert statements == []  # nothing to weigh up: the orchestrator answers with the summary
             else:
                 assert statements, (label, intent, target)
+            for st in statements:  # D10: label by who proposed the action
+                kinds = {ctx.reg.get(r).kind for r in st["refs"]}
+                if st["label"] == "RECOMMENDATION":
+                    assert "recommendation" in kinds and "prediction" not in kinds, st
+                if kinds & {"prediction"} and any(ctx.reg.get(r).group in ctx.reg.what_if_groups for r in st["refs"]):
+                    assert st["label"] == "PREDICTION", st
             if statements:
                 v = validate({"language": language, "statements": statements}, reg, language)
                 assert v.ok, (label, intent, target, v.errors, statements)
                 checked += len(statements)
     assert checked > 100
+
+
+def test_what_ifs_are_conditional_predictions(copilot_world, categoriser):
+    """D10 as corrected in the Phase 5 review: the user's what-if is a PREDICTION phrased with its condition, with
+    its confidence and assumptions; only Hisaab's own proposal is a RECOMMENDATION."""
+    last = copilot_world.steps[-1]
+    cp = Copilot(copilot_world.sf, categoriser, None, persist=False)
+    for language, cond in (("en", "If you"), ("hi", "अगर"), ("hinglish", "Agar")):
+        reg = Registry()
+        ctx = ToolContext("demo-a", language, last.snapshot.payload, last.diff.payload, reg,
+                          simulator=cp._simulator("demo-a", last.snapshot))
+        for unit, value in user_numbers("₹60,000 12 months"):
+            reg.add("user_input", unit, value, "a number you typed")
+        st = render("afford_emi", ctx, run_plan(ctx, Intent("afford_emi", SLOTS["afford_emi"])))
+        what_if = [s for s in st if any(reg.get(r).group in reg.what_if_groups for r in s["refs"])
+                   and s["label"] == "PREDICTION"]
+        assert len(what_if) >= 2 and all(s["text"].startswith(cond) for s in what_if), st
+        assert any("₹5,415" in s["text"] for s in what_if) and any("₹3,743" in s["text"] for s in what_if)
+        assert all("15%" in s["text"] for s in what_if)  # the assumed rate is stated
+        assert [s["label"] for s in st].count("RECOMMENDATION") >= 1  # Hisaab's own proposal
+        offers = [o for o in last.snapshot.payload["what_if_offers"]]
+        if offers:
+            reg2 = Registry()
+            ctx2 = ToolContext("demo-a", language, last.snapshot.payload, None, reg2)
+            t2 = render("tradeoff", ctx2, run_plan(ctx2, Intent("tradeoff", {"target_type": "change_emi_tenure"})))
+            assert t2 and all(s["label"] == "PREDICTION" and s["text"].startswith(cond) for s in t2), t2
 
 
 def test_trade_off_questions_explain_the_downside(copilot_world, categoriser):

@@ -154,12 +154,15 @@ def test_blocks_rounding_below_two_significant_figures(reg):
     assert codes(c, reg) == []
 
 
-def test_language_and_script(reg):
+def test_only_a_script_mismatch_blocks(reg):
+    """Fix 7: English vs Hinglish is style (a soft note for the eval); Devanagari vs Latin is a hard failure."""
     c = golden(reg, "en")
-    assert codes(c, reg, "hinglish") == ["LANG_MISMATCH"]  # the user wrote Hinglish, the answer is English
+    v = validate(c, reg, "hinglish")  # the user wrote Hinglish, the answer is English: allowed, noted
+    assert v.ok and {n.code for n in v.notes} == {"LANG_STYLE"}
     h = golden(reg, "hi")
     h["statements"][0]["text"] = "Aapki monthly income ₹1,03,040 hai aur EMIs abhi income ka 18% hain."
     assert codes(h, reg, "hi") == ["LANG_MISMATCH"]  # Hindi must be in Devanagari
+    assert codes(golden(reg, "hinglish"), reg, "hi") == ["LANG_MISMATCH"]  # Latin script for a Hindi question
 
 
 def test_blocks_pii_in_the_output(reg):
@@ -215,3 +218,53 @@ def test_adversarial_rounding_abuse_with_a_copy(reg):
     c = copy.deepcopy(golden(reg, "en"))
     c["statements"][2]["text"] = c["statements"][2]["text"].replace("₹5,415", "₹5k")
     assert codes(c, reg) == ["NUM_UNMATCHED"]
+
+
+# ---- D10 (Phase 5 review): label by who proposed the action ------------------------------------------------
+@pytest.fixture
+def what_if():
+    """The user's what-if: a new EMI. Its numbers are prediction-kind in a what-if group."""
+    r = Registry()
+    r.confidence = {"label": "Medium", "reason": ""}
+    r.add("user_input", "inr", 6000000, "phone price you gave", key="price")
+    r.add("user_input", "months", 12, "tenure you gave", key="tenure")
+    g = r.new_group()
+    r.what_if_groups.add(g)
+    r.group_confidence[g] = "Medium"
+    r.add("prediction", "inr", 541500, "the new EMI", g, key="emi")
+    r.add("prediction", "pct", 66, "largest EMI bounce risk with it", g, key="bounce_after")
+    r.add("assumption", "pct", 15, "interest rate a year (assumed)", g, key="rate")
+    h = r.new_group()
+    r.group_confidence[h] = "Medium"
+    r.add("recommendation", "inr", 2266900, "saved over 12 months by clearing the card", h, key="saved")
+    return r
+
+
+def st(label, text, reg, *keys):
+    return {"language": "en", "statements": [{"label": label, "text": text, "refs": ids(reg, *keys)}]}
+
+
+def test_a_what_if_is_a_conditional_prediction(what_if):
+    ok = st("PREDICTION", "If you take the ₹60,000 phone over 12 months, the EMI would be ₹5,415 and your biggest "
+                          "EMI bounce risk 66% (Medium confidence). Assumes 15% interest a year.",
+            what_if, "price", "tenure", "emi", "bounce_after", "rate")
+    assert validate(ok, what_if, "en").ok, validate(ok, what_if, "en").errors
+    as_rec = st("RECOMMENDATION", "Take the ₹60,000 phone: the EMI would be ₹5,415 at 15% a year.",
+                what_if, "price", "emi", "rate")
+    assert "LABEL_KIND" in codes(as_rec, what_if) and "REC_NO_IMPACT" in codes(as_rec, what_if)
+    no_condition = st("PREDICTION", "The EMI would be ₹5,415 (Medium confidence). Assumes 15% interest a year.",
+                      what_if, "emi", "rate")
+    assert codes(no_condition, what_if) == ["CONDITION_MISSING"]
+    no_assumption = st("PREDICTION", "If you take it, the EMI would be ₹5,415 (Medium confidence).", what_if, "emi")
+    assert codes(no_assumption, what_if) == ["ASSUMPTION_NOT_CITED"]
+    no_confidence = st("PREDICTION", "If you take it, the EMI would be ₹5,415. Assumes 15% interest a year.",
+                       what_if, "emi", "rate")
+    assert codes(no_confidence, what_if) == ["PRED_NO_CONF"]
+
+
+def test_only_hisaabs_own_proposal_is_a_recommendation(what_if):
+    ok = st("RECOMMENDATION", "Clear the card from savings: you save ₹22,669 over a year.", what_if, "saved")
+    assert validate(ok, what_if, "en").ok
+    as_prediction = st("PREDICTION", "If you clear the card, you save ₹22,669 over a year (Medium confidence).",
+                       what_if, "saved")
+    assert codes(as_prediction, what_if) == ["LABEL_KIND"]

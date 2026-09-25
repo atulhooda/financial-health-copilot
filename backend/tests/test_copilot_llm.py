@@ -71,6 +71,19 @@ def test_anthropic_request_shape_and_reply():
     assert reply.tool_calls == [ToolCall("tu_1", "respond", {"language": "en", "statements": []})]
 
 
+def test_anthropic_low_effort_per_call_timeout_and_effort_fallback():
+    from app.copilot.llm.anthropic import _NO_EFFORT
+
+    _NO_EFFORT.discard("m-effort")
+    ok = anthropic_reply([tool_use("get_metrics", {})])
+    rec = Recorder([BadRequestError("output_config.effort: not supported for this model"), ok, ok])
+    client = AnthropicClient("m-effort", "k", effort="low", client=SimpleNamespace(messages=rec), sdk=SDK)
+    client.chat("s", [{"role": "user", "content": "q"}], TOOLS, "any", timeout=7.5)
+    client.chat("s", [{"role": "user", "content": "q"}], TOOLS, "any")
+    assert rec.calls[0]["output_config"] == {"effort": "low"} and rec.calls[0]["timeout"] == 7.5
+    assert "output_config" not in rec.calls[1] and "output_config" not in rec.calls[2]  # remembered
+
+
 def test_anthropic_forced_tool_choice_falls_back_to_auto_and_remembers():
     _NO_FORCED_TOOL_CHOICE.discard("m-forced")
     err = BadRequestError("tool_choice: type 'tool' and 'any' are not supported for this model.")
@@ -131,7 +144,7 @@ def test_masking_wrapper_masks_user_text_and_tool_results_only():
     class Inner:
         provider, model = "fake", "fake"
 
-        def chat(self, system, messages, tools, tool_choice):
+        def chat(self, system, messages, tools, tool_choice, timeout=None):
             seen["messages"] = messages
             return LLMReply("", [], "end_turn")
 

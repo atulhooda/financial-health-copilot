@@ -26,7 +26,8 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_timeout_s: float = 20.0  # per LLM call (COPILOT.md §2)
-    llm_effort: str | None = None  # Anthropic output_config.effort (low | medium | high); unset = model default
+    llm_effort: str | None = "low"  # Anthropic output_config.effort; numbers come from tools, so no long thinking
+    copilot_deadline_s: float = 20.0  # per question, across all calls; then the template answer is served
     demo_mode: bool = False
     seed: int = 20260920
     clock: str | None = None  # YYYY-MM-DD -> FixedClock
@@ -52,3 +53,22 @@ def load_yaml(name: str) -> dict:
     path = CONFIG_DIR / (name if name.endswith(".yaml") else f"{name}.yaml")
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def secret(name: str) -> str | None:
+    """A secret by env var name, from the process environment or the gitignored backend/.env. Never logged."""
+    import os
+
+    if os.environ.get(name):
+        return os.environ[name]
+    path = BACKEND_DIR / ".env"
+    if not path.exists():
+        return None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, sep, value = line.strip().partition("=")
+        if sep and key.strip() == name and not key.strip().startswith("#"):
+            value = value.strip()
+            if value and value[0] in "\"'":  # quoted: keep everything inside the quotes
+                return value[1:].split(value[0], 1)[0] or None
+            return value.split(" #", 1)[0].strip() or None  # unquoted: drop an inline comment
+    return None

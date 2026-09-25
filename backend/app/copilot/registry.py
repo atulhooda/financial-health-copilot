@@ -2,8 +2,9 @@
 
 The LLM only ever sees numbers as registry entries {id, kind, display, desc}; the validator matches every number
 in an answer back to an entry of this turn. Kinds: fact | prediction | recommendation | assumption | user_input.
-Recommendation and assumption entries of one simulated action share a `group`, so the validator can check that a
-recommendation states the assumptions it rests on (Phase 5 item 8).
+The numbers and assumptions of one simulation share a `group`, so the validator can check that a statement states the
+assumptions it rests on (Phase 5 item 8). Numbers of an action Hisaab proposes are `recommendation`-kind; numbers of a
+what-if the user asked about are `prediction`-kind in a what-if group: a conditional PREDICTION (D10).
 """
 from __future__ import annotations
 
@@ -67,6 +68,8 @@ class Registry:
         self._groups = 0
         self.confidence: dict | None = None  # the forecast's confidence (label + reason) this turn
         self.by_key: dict[str, Entry] = {}
+        self.group_confidence: dict[str, str] = {}  # simulation group -> its confidence label
+        self.what_if_groups: set[str] = set()  # groups the user asked about (conditional PREDICTIONs, D10)
 
     def new_group(self) -> str:
         self._groups += 1

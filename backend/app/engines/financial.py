@@ -75,6 +75,9 @@ class Metrics:
     floor_paise: int
     coverage: dict = field(default_factory=dict)
     earmarks: list[Earmark] = field(default_factory=list)
+    # observed surplus per trailing complete cycle: what was left after spending, SIPs and money already moved
+    # to own savings. Sweeps can't exceed it (Phase 5 review fix 6).
+    surplus_cycles: list[dict] = field(default_factory=list)
 
 
 # ---- helpers -------------------------------------------------------------------------------------
@@ -224,6 +227,29 @@ def top_merchants(view: View, n: int = 10, days: int = 30) -> list[dict]:
              "amount_paise": int(r["amount"]), "count": int(r["count"])} for r in rows.iter_rows(named=True)]
 
 
+def _surplus_cycles(view: View, cycles: list[Cycle]) -> list[dict]:
+    """Per cycle: income − spend − SIPs − net transfers from the operating account into own savings (FACT)."""
+    tx = view.txns
+    op = view.operating
+    reserve = {a.account_id for a in view.of_kind("savings", "current")} - ({op.account_id} if op else set())
+    out = []
+    for c in cycles:
+        d = _in(tx, c.start, c.end)
+        income = int(d.filter(pl.col("income") & (pl.col("direction") == "credit"))["amount"].sum() or 0)
+        sip = int(d.filter((pl.col("category") == "sip_investment") & (pl.col("direction") == "debit"))["amount"]
+                  .sum() or 0)
+        moved = 0
+        if op is not None and reserve:
+            legs = d.filter((pl.col("account_id") == op.account_id) & pl.col("counter_account_id").is_in(list(reserve))
+                            & (pl.col("category") == "transfer_self"))
+            moved = int(legs.filter(pl.col("direction") == "debit")["amount"].sum() or 0) - \
+                int(legs.filter(pl.col("direction") == "credit")["amount"].sum() or 0)
+        spend = _spend(d)
+        out.append({"start": c.start, "end": c.end, "income_paise": income, "spend_paise": spend, "sip_paise": sip,
+                    "moved_to_savings_paise": moved, "surplus_paise": income - spend - sip - max(0, moved)})
+    return out
+
+
 def compute_metrics(view: View, recurring: list[RecurringItem] | None = None) -> Metrics:
     tx = view.txns
     recurring = detect_recurring(view) if recurring is None else recurring
@@ -334,4 +360,5 @@ def compute_metrics(view: View, recurring: list[RecurringItem] | None = None) ->
         debt_growth=_debt_growth(cards, salary_level or income, recurring),
         recurring=recurring, overlaps=overlapping_subscriptions(recurring),
         spend_by_category=by_cat, drift=drift, discretionary_ratio=disc_ratio, cycle_lows=lows, bounces=bounces,
-        floor_paise=view.floor_paise, coverage=coverage, earmarks=earmarks)
+        floor_paise=view.floor_paise, coverage=coverage, earmarks=earmarks,
+        surplus_cycles=_surplus_cycles(view, trailing))

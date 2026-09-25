@@ -4,7 +4,7 @@ Status: **Version 2 (pre-Phase-5 fix, 2026-09-24): the score never punishes payi
 
 ## 1. Principles
 - **0–100, six pillars, fixed weights.** Every pillar maps a single observed metric to 0–100 by **piecewise-linear interpolation** between documented breakpoints. Values beyond the end breakpoints are clamped.
-- **Observed data only.** The current score is a FACT (SPEC D10). Nothing in it comes from the forecast. Any projected score (12-month, combined plan, what-if) is a simulation output, labelled RECOMMENDATION with its assumptions and never FACT.
+- **Observed data only.** The current score is a FACT (SPEC D10). Nothing in it comes from the forecast. A projected score is a simulation output, never a FACT, labelled by who proposed the action (D10): a RECOMMENDATION for an action Hisaab proposes (12-month, combined plan), a conditional PREDICTION for a what-if the user asks about, with its condition, assumptions and confidence.
 - **Transparent.** The API returns each pillar's input value, pillar score, weight and **contribution** (points added to the total).
 - **Missing data is excluded, not guessed.** If a pillar can't be computed, it gets `status: "insufficient_data"`, its weight is redistributed proportionally across the other pillars, and `score_coverage` (sum of original weights of included pillars) is returned. Example: a user with no credit card, or a card not linked yet.
 

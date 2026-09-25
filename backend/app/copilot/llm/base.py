@@ -44,7 +44,7 @@ class LLMClient(Protocol):
     model: str
 
     def chat(self, system: str, messages: list[dict], tools: list[dict],
-             tool_choice: Literal["any", "auto"]) -> LLMReply: ...
+             tool_choice: Literal["any", "auto"], timeout: float | None = None) -> LLMReply: ...
 
 
 SAFE_KEYS = frozenset({"id", "kind", "display"})  # registry fields our code generates from numbers
@@ -70,7 +70,7 @@ class MaskingLLM:
         self.provider, self.model = inner.provider, inner.model
 
     def chat(self, system: str, messages: list[dict], tools: list[dict],
-             tool_choice: Literal["any", "auto"]) -> LLMReply:
+             tool_choice: Literal["any", "auto"], timeout: float | None = None) -> LLMReply:
         masked = []
         for m in messages:
             if m["role"] == "user":
@@ -80,4 +80,4 @@ class MaskingLLM:
                     {**r, "content": mask_tool_content(self.masker, r["content"])} for r in m["results"]]})
             else:
                 masked.append(m)
-        return self.inner.chat(self.masker.mask(system), masked, tools, tool_choice)
+        return self.inner.chat(self.masker.mask(system), masked, tools, tool_choice, timeout=timeout)

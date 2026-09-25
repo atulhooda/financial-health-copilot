@@ -20,12 +20,14 @@ class FakeLLM:
     def __init__(self, steps: list[Step]):
         self.steps = list(steps)
         self.payloads: list[dict] = []  # exactly what an adapter would send, after masking
+        self.timeouts: list[float | None] = []
 
     def chat(self, system: str, messages: list[dict], tools: list[dict],
-             tool_choice: Literal["any", "auto"]) -> LLMReply:
+             tool_choice: Literal["any", "auto"], timeout: float | None = None) -> LLMReply:
         self.payloads.append({"system": system, "messages": copy.deepcopy(
             [m if m["role"] != "assistant" else {"role": "assistant"} for m in messages]), "tools": tools,
             "tool_choice": tool_choice})
+        self.timeouts.append(timeout)
         if not self.steps:
             raise AssertionError("FakeLLM script exhausted")
         step = self.steps.pop(0)

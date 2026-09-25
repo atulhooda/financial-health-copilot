@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+import statistics
 from collections.abc import Callable
 from dataclasses import dataclass, field
+
+import numpy as np
 
 from app.core.config import load_yaml
 from app.core.dates import add_months
@@ -35,7 +38,9 @@ from app.engines.schedule import ScheduledFlow, build_schedule
 from app.engines.score import Score
 from app.engines.view import View
 
-SWEEP_MAX_STEPS = 80  # ₹500 x 80 = ₹40,000: upper bound of the sweep search
+SWEEP_MAX_STEPS = 400  # ₹500 x 400 = ₹2,00,000: a safety bound only; the surplus limit binds first (tested)
+PAYOUT_SHARE_STEP_BPS = 100  # irregular income: sweeps are sized in 1% steps of each payout
+SURPLUS_LOW_PERCENTILE = 20  # irregular income: the monthly surplus share used as the limit
 EMI_DAYS_AFTER_PAYDAY = 2  # "just after payday" option for a new EMI
 LONG_HORIZON = 90  # days: post-clearing bounce check and EMI what-ifs look 2-3 months ahead
 BOUNCE_TOLERANCE = 0.02
@@ -87,6 +92,7 @@ class Action:
     auto: bool = True  # False: a what-if (D8), never auto-recommended
     confidence_cap: str | None = None
     extra: dict = field(default_factory=dict)
+    payout_share: float = 0.0  # irregular income: a sweep of this share of every payout (fix 6)
 
 
 @dataclass
@@ -168,8 +174,16 @@ def max_mandate_bounce(fc: Forecast) -> float:
     return max([b.probability for b in fc.bounce_risks if b.mandate] or [0.0])
 
 
-def _rerun(ctx: Context, schedule: list[ScheduledFlow]) -> Forecast:
-    fc, _ = run_forecast(ctx.view, ctx.metrics.recurring, schedule=schedule, pools=ctx.pools)
+def top_mandate(fc: Forecast) -> dict | None:
+    """The EMI/SIP most likely to bounce (ties: the earliest), for "bounce risk on the Bajaj EMI rises to X%"."""
+    b = max((x for x in fc.bounce_risks if x.mandate), key=lambda x: (x.probability, -x.due_date.toordinal()),
+            default=None)
+    return {"name": b.name, "due_date": b.due_date, "probability": b.probability} if b else None
+
+
+def _rerun(ctx: Context, schedule: list[ScheduledFlow], payout_share: float = 0.0) -> Forecast:
+    fc, _ = run_forecast(ctx.view, ctx.metrics.recurring, schedule=schedule, pools=ctx.pools,
+                         payout_share={ctx.forecast.account_id: payout_share} if payout_share else None)
     return fc
 
 
@@ -184,17 +198,18 @@ def _reserve(ctx: Context) -> list:
 
 
 def _cushion(ctx: Context) -> int:
-    """D30: floor + scheduled debits due before the next income that the salary account can't already cover.
+    """D30/D38: floor + the part of the debits due before the next income that the salary account can't cover.
 
-    Refined in the pre-Phase-5 fixes: right after payday the salary account already holds this month's rent,
-    EMI and SIP, so counting them against savings too would double-protect them and block clearing the card."""
-    nid = ctx.forecast.next_income_date or ctx.view.as_of
-    deposits = {a.account_id for a in ctx.view.of_kind("savings", "current")}
-    due = sum(f.amount_paise for f in ctx.forecast.schedule if f.direction == "debit" and f.date < nid
-              and f.kind != "card_payment" and f.account_id in deposits)
-    op = ctx.view.operating
-    covered = max(0, (op.balance_paise or 0) - ctx.metrics.earmarked_loan_paise) if op else 0
-    return ctx.view.floor_paise + max(0, due - covered)
+    Phase 5 review: "can't cover" is measured against the forecast's P10 end-of-day balance on each debit's due
+    date, not today's balance. A spends down through the month, so today's balance overstates what will be there.
+    Cash-need paths deduct every obligation, so a negative P10 is the amount that isn't covered in a bad month."""
+    fc = ctx.forecast
+    nid = fc.next_income_date or ctx.view.as_of
+    at = {d: i for i, d in enumerate(fc.dates)}
+    due_days = {f.date for f in fc.schedule if f.direction == "debit" and f.account_id == fc.account_id
+                and f.date < nid and f.date in at}
+    shortfall = max([-fc.p10[at[d]] for d in due_days] or [0])
+    return -(-(ctx.view.floor_paise + max(0, shortfall)) // 500_00) * 500_00  # up to the next ₹500
 
 
 def _card_rate_assumption(ctx: Context) -> dict:
@@ -354,58 +369,118 @@ def _with_sweep(ctx: Context, flows: list[ScheduledFlow], x: int, to_card: bool)
     return sorted(flows + adds, key=lambda f: f.sort_key())
 
 
-def _size_sweep(ctx: Context, to_card: bool) -> int:
-    """D7 with D34: the largest ₹500 step whose payday debit raises mandate bounce risk by <= 2 pp
-    (and dip probability by <= 2 pp while the dip metric isn't saturated)."""
-    step, limit = ctx.cfg["sweep_step_paise"], ctx.cfg["sweep_max_dip_increase_pp"] / 100
-    base_b, base_d = max_mandate_bounce(ctx.forecast), ctx.forecast.dip_probability or 0.0
+def surplus_limit(metrics: Metrics) -> float | int | None:
+    """Fix 6: a sweep can't exceed the observed surplus of the trailing complete cycles (FACT). Salaried: the
+    median monthly surplus, in paise. Irregular income: a low percentile of each month's surplus as a share of
+    that month's income. None without complete cycles (no evidence, no sweep)."""
+    cyc = metrics.surplus_cycles
+    if not cyc:
+        return None
+    if metrics.income_pattern == "irregular":
+        shares = [c["surplus_paise"] / c["income_paise"] for c in cyc if c["income_paise"] > 0]
+        return float(np.percentile(shares, SURPLUS_LOW_PERCENTILE, method="linear")) if shares else None
+    return int(statistics.median(c["surplus_paise"] for c in cyc))
 
-    def ok(x: int) -> bool:
-        fc = _rerun(ctx, _with_sweep(ctx, ctx.forecast.schedule, x, to_card))
-        good = max_mandate_bounce(fc) - base_b <= limit + 1e-9
-        if not ctx.saturated:
-            good = good and (fc.dip_probability or 0.0) - base_d <= limit + 1e-9
-        return good
 
-    lo, hi = 0, SWEEP_MAX_STEPS  # monotone: a bigger sweep never lowers bounce risk (same random draws)
+def _within_risk(ctx: Context, fc: Forecast) -> str | None:
+    """None if the sweep keeps to D7/D34: mandate bounce risk and (unless saturated) dip up by <= 2 pp."""
+    limit = ctx.cfg["sweep_max_dip_increase_pp"] / 100
+    if max_mandate_bounce(fc) - max_mandate_bounce(ctx.forecast) > limit + 1e-9:
+        return "bounce_risk"
+    if not ctx.saturated and (fc.dip_probability or 0.0) - (ctx.forecast.dip_probability or 0.0) > limit + 1e-9:
+        return "dip"
+    return None
+
+
+def _largest(top: int, fails, cap_bound: bool) -> tuple[int, str]:
+    """Largest n in [0, top] with fails(n) is None (monotone: a bigger sweep never lowers risk under the same
+    draws). Returns (n, what bound it): the risk rule that failed at n + 1, or the limit that set `top`."""
+    lo, hi = 0, top
     while lo < hi:
         mid = (lo + hi + 1) // 2
-        if ok(mid * step):
+        if fails(mid) is None:
             lo = mid
         else:
             hi = mid - 1
-    return lo * step
+    if lo < top:
+        return lo, fails(lo + 1)
+    return lo, "cap" if cap_bound else "surplus"
+
+
+def _size_sweep(ctx: Context, to_card: bool) -> tuple[int, str]:
+    """D7 + fix 6: the largest ₹500 step within the observed monthly surplus whose payday debit keeps to the bounce
+    and dip rule. Returns (amount, binding) where binding is "surplus", "bounce_risk", "dip" or "cap"."""
+    step = ctx.cfg["sweep_step_paise"]
+    limit = surplus_limit(ctx.metrics)
+    if limit is None or limit < step:
+        return 0, "surplus"
+    top = min(SWEEP_MAX_STEPS, int(limit) // step)
+    n, binding = _largest(top, lambda k: _within_risk(ctx, _rerun(ctx, _with_sweep(ctx, ctx.forecast.schedule,
+                                                                                     k * step, to_card))),
+                          cap_bound=int(limit) // step > SWEEP_MAX_STEPS)
+    return n * step, binding
+
+
+def _size_payout_share(ctx: Context) -> tuple[int, str]:
+    """Irregular income (fix 6): the sweep is a share of each payout, in 1% steps, within the low-percentile
+    surplus share and the bounce/dip rule. Returns (share in basis points, binding)."""
+    limit = surplus_limit(ctx.metrics)
+    if limit is None or limit <= 0:
+        return 0, "surplus"
+    top = min(10000 // PAYOUT_SHARE_STEP_BPS, int(limit * 10000) // PAYOUT_SHARE_STEP_BPS)
+    n, binding = _largest(top, lambda k: _within_risk(ctx, _rerun(ctx, ctx.forecast.schedule,
+                                                                  k * PAYOUT_SHARE_STEP_BPS / 10000)),
+                          cap_bound=False)
+    return n * PAYOUT_SHARE_STEP_BPS, binding
 
 
 def gen_auto_sweep(ctx: Context) -> list[Action]:
-    """D7 + D30(b): while the card revolves, a payday sweep targets the card; otherwise savings."""
+    """D7 + D30(b): while the card revolves, a payday sweep targets the card; otherwise savings. Fix 6: sized within
+    the observed monthly surplus; for irregular income, a share of each payout instead of a fixed amount."""
     if ctx.forecast.account_id is None or not ctx.forecast.available:
         return []
     to_card = bool(ctx.card and ctx.card.revolving_paise)
     unknown_card_debt = any(c.revolving_paise is None for c in ctx.metrics.cards)
     if not to_card and unknown_card_debt:
         return []  # D30(e): a visible but unlinked card may be revolving; don't push savings before we know
-    has_savings_sweep = any(it.kind == "sweep" and it.active for it in ctx.metrics.recurring)
-    x = _size_sweep(ctx, to_card)
+    reserve_ids = {a.account_id for a in _reserve(ctx)}
+    has_savings_sweep = any(it.kind == "sweep" and it.active and it.direction == "debit"
+                            and it.account_id == ctx.forecast.account_id and it.counter_account_id in reserve_ids
+                            for it in ctx.metrics.recurring)  # salary account -> savings, not the other way round
+    irregular = ctx.metrics.income_pattern == "irregular"
+    if irregular:
+        bps, binding = _size_payout_share(ctx)
+        x = int(round(bps / 10000 * ctx.metrics.income_monthly_paise))  # the monthly equivalent, for the impact
+    else:
+        (x, binding), bps = _size_sweep(ctx, to_card), 0
     if x < 1_000_00:
         return []
+    share = bps / 10000
 
     def schedule(flows):
-        return _with_sweep(ctx, flows, x, to_card)
+        return flows if irregular else _with_sweep(ctx, flows, x, to_card)
 
+    common = {"amount_paise": x, "binding": binding, "surplus_limit": surplus_limit(ctx.metrics)}
+    if irregular:
+        common |= {"share_bps": bps, "per": "payout"}
     if to_card:
-        return [Action("auto_sweep:card", "auto_sweep", f"On payday, send {format_inr(x)} extra to the card",
-                       {"amount_paise": x, "target": "card"}, Modifier(extra_to_card_from_surplus=x,
-                                                                       pay_in_full_once_clear=True), schedule,
+        title = (f"Send {bps / 100:g}% of each payout to the card (about {format_inr(x)} a month)" if irregular else
+                 f"On payday, send {format_inr(x)} extra to the card")
+        return [Action("auto_sweep:card", "auto_sweep", title, {**common, "target": "card"},
+                       Modifier(extra_to_card_from_surplus=x, pay_in_full_once_clear=True), schedule,
                        [_card_rate_assumption(ctx), _unswept_assumption(ctx), PAY_IN_FULL],
-                       ["INCOME_INCREASED", "HIGH_COST_DEBT_FOUND", "DEBT_GROWING"], confidence_cap="Medium")]
-    verb = "Increase your payday transfer to savings by" if has_savings_sweep else "On payday, move"
-    tail = "" if has_savings_sweep else " to savings"
-    return [Action("auto_sweep:savings", "auto_sweep", f"{verb} {format_inr(x)}{tail}",
-                   {"amount_paise": x, "target": "savings", "increase": has_savings_sweep},
+                       ["INCOME_INCREASED", "HIGH_COST_DEBT_FOUND", "DEBT_GROWING"], confidence_cap="Medium",
+                       payout_share=share)]
+    if irregular:
+        title = f"Move {bps / 100:g}% of each payout to savings (about {format_inr(x)} a month)"
+    else:
+        verb = "Increase your payday transfer to savings by" if has_savings_sweep else "On payday, move"
+        title = f"{verb} {format_inr(x)}" + ("" if has_savings_sweep else " to savings")
+    return [Action("auto_sweep:savings", "auto_sweep", title,
+                   {**common, "target": "savings", "increase": has_savings_sweep},
                    Modifier(sweep_to_savings_from_surplus=x), schedule,
                    [_unswept_assumption(ctx), _savings_rate_assumption(ctx)], ["INCOME_INCREASED"],
-                   confidence_cap="Medium")]
+                   confidence_cap="Medium", payout_share=share)]
 
 
 def gen_cancel_overlapping_subs(ctx: Context) -> list[Action]:
@@ -565,7 +640,8 @@ def evaluate(ctx: Context, action: Action, rank: int | None = None) -> Recommend
     base_fc = ctx.forecast
     if "base_schedule_fn" in action.extra:  # delay_purchase: compare buying later with buying now
         base_fc = _rerun(ctx, action.extra["base_schedule_fn"](ctx.forecast.schedule))
-    fc = _rerun(ctx, action.schedule_fn(ctx.forecast.schedule)) if action.schedule_fn else base_fc
+    fc = _rerun(ctx, action.schedule_fn(ctx.forecast.schedule), action.payout_share) if action.schedule_fn \
+        else base_fc
     proj = project(ctx.inputs, action.modifier)
     base = ctx.baseline
     card_saved = card_interest_total(base) - card_interest_total(proj)
@@ -604,6 +680,8 @@ def evaluate(ctx: Context, action: Action, rank: int | None = None) -> Recommend
         "dip_probability_before": base_fc.dip_probability,
         "dip_probability_after": fc.dip_probability,
         "dip_saturated": ctx.saturated,
+        "top_bounce_before": top_mandate(base_fc),
+        "top_bounce_after": top_mandate(fc),
     }
     if action.type == "new_emi":
         impact["emi_dates"] = _emi_date_options(ctx, action)
@@ -660,7 +738,8 @@ def combined_plan(ctx: Context, actions: list[Action]) -> dict | None:
         return flows
 
     combo = Action("combined_plan", "combined_plan", "Do the top actions together", {"actions": [a.key for a in actions]},
-                   mod, schedule, [x for a in actions for x in a.assumptions], [])
+                   mod, schedule, [x for a in actions for x in a.assumptions], [],
+                   payout_share=sum(a.payout_share for a in actions))
     rec = evaluate(ctx, combo)
     seen, assumptions = set(), []
     for x in rec.assumptions:

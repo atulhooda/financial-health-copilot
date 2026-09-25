@@ -71,3 +71,24 @@ tradeoff_targets:  # which recommendation a trade-off question is about; first m
   auto_sweep: [sweep, auto-save, autosave, auto save]
   change_emi_tenure: [tenure, extend, extension, lamba, अवधि]
   pay_down_card: [clear, clearing, pay off, card, savings, bachat, कार्ड, बचत]
+
+conditional:
+  # A what-if the user asked about is a conditional PREDICTION (D10): it states its condition, e.g. "If you take the
+  # 12-month EMI, …". Any of these counts (whole words for Latin script; Devanagari on a leading boundary).
+  en: [if, should you, were you to, assuming you, in case]
+  hinglish: [agar, yadi, lene par, karne par, lete hain, lenge toh, karenge toh, lein toh, karein toh]
+  hi: [अगर, यदि, लेने पर, करने पर, लेते हैं, लेंगे तो, करेंगे तो]
+
+eval_candidates:
+  # Phase 5 review item 9: pick by the numbers, in this order: template fallback rate, first-draft block rate,
+  # label violations, p95 latency, then cost. Keys come from the env or the gitignored backend/.env, by NAME only.
+  - {label: haiku-4.5, provider: anthropic, model: claude-haiku-4-5-20251001, api_key_env: ANTHROPIC_API_KEY}
+  - {label: sonnet-5, provider: anthropic, model: claude-sonnet-5, api_key_env: ANTHROPIC_API_KEY}
+  - {label: openai-compat, provider: openai_compat, model_env: OPENAI_COMPAT_MODEL, base_url_env: OPENAI_COMPAT_BASE_URL,
+     api_key_env: OPENAI_COMPAT_API_KEY}
+
+pricing:
+  # USD per million tokens (input, output), for the eval's cost column. Check against the provider's price page
+  # before quoting: Sonnet 5 is from the Claude API docs bundled with the tooling; Haiku 4.5 is its list price.
+  claude-sonnet-5: {input: 2.0, output: 10.0}
+  claude-haiku-4-5-20251001: {input: 1.0, output: 5.0}

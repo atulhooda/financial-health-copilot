@@ -44,6 +44,7 @@ class Pool:
     days: list[dt.date]
     credits: np.ndarray  # paise per day
     debits: np.ndarray  # paise per day, positive
+    income: np.ndarray | None = None  # the part of `credits` that is income (irregular payouts live here)
 
     @property
     def values(self) -> np.ndarray:  # net per day (credits positive)
@@ -66,17 +67,20 @@ def build_pool(view: View, account_id: str, recurring: list[RecurringItem]) -> P
     scheduled_keys = {(r.merchant_key, r.direction) for r in recurring if r.account_id == account_id}
     tx = view.txns.filter((pl.col("account_id") == account_id) & ~pl.col("category").is_in(list(POOL_EXCLUDED))
                           & ~pl.col("is_card_payment"))
-    rows = [r for r in tx.select(["date", "amount", "direction", "merchant_key"]).iter_rows(named=True)
+    rows = [r for r in tx.select(["date", "amount", "direction", "merchant_key", "income"]).iter_rows(named=True)
             if (r["merchant_key"], r["direction"]) not in scheduled_keys]
     start = max(acc.visible_from, view.as_of - dt.timedelta(days=POOL_DAYS - 1))
     n = (view.as_of - start).days + 1
     if n < 28:
         return None
     credits, debits = np.zeros(n, dtype=np.int64), np.zeros(n, dtype=np.int64)
+    income = np.zeros(n, dtype=np.int64)
     for r in rows:
         if r["date"] >= start:
             (credits if r["direction"] == "credit" else debits)[(r["date"] - start).days] += r["amount"]
-    return Pool(account_id, [start + dt.timedelta(days=i) for i in range(n)], credits, debits)
+            if r["direction"] == "credit" and r["income"]:
+                income[(r["date"] - start).days] += r["amount"]
+    return Pool(account_id, [start + dt.timedelta(days=i) for i in range(n)], credits, debits, income)
 
 
 @dataclass
@@ -91,7 +95,10 @@ class AccountPaths:
 
 
 def simulate_account(view: View, account_id: str, opening: int, schedule: list[ScheduledFlow], pool: Pool | None,
-                     horizon: int = HORIZON_DAYS, n_paths: int = N_PATHS, seed_parts: tuple = ()) -> AccountPaths:
+                     horizon: int = HORIZON_DAYS, n_paths: int = N_PATHS, seed_parts: tuple = (),
+                     payout_share: float = 0.0) -> AccountPaths:
+    """`payout_share`: a sweep of that share of every income credit the pool draws (irregular income, where
+    payouts are not scheduled). It reuses the same draws, so it changes nothing else (CRN)."""
     rng = rng_for(view.user_id, "forecast", account_id, *seed_parts)
     dates = [view.as_of + dt.timedelta(days=i + 1) for i in range(horizon)]
     # Draw all discretionary flows first, in a fixed order, independent of the schedule (CRN).
@@ -102,6 +109,8 @@ def simulate_account(view: View, account_id: str, opening: int, schedule: list[S
             cands = pool.candidates(d)
             pick = cands[rng.integers(0, len(cands), size=n_paths)]
             disc_c[:, i], disc_d[:, i] = pool.credits[pick], pool.debits[pick]
+            if payout_share and pool.income is not None:
+                disc_d[:, i] += np.rint(payout_share * pool.income[pick]).astype(np.int64)
     mine = [(k, f) for k, f in enumerate(schedule) if f.account_id == account_id]
     by_day: dict[dt.date, list[tuple[int, ScheduledFlow]]] = {}
     for k, f in mine:
@@ -198,7 +207,8 @@ def _pct(paths: np.ndarray, q: float) -> list[int]:
 
 def run_forecast(view: View, recurring: list[RecurringItem], schedule: list[ScheduledFlow] | None = None,
                  horizon: int = HORIZON_DAYS, n_paths: int = N_PATHS, seed_parts: tuple = (),
-                 pools: dict[str, Pool | None] | None = None) -> tuple[Forecast, dict[str, AccountPaths]]:
+                 pools: dict[str, Pool | None] | None = None,
+                 payout_share: dict[str, float] | None = None) -> tuple[Forecast, dict[str, AccountPaths]]:
     """The forecast plus the raw paths (kept for simulations; never serialised)."""
     start, end = view.as_of + dt.timedelta(days=1), view.as_of + dt.timedelta(days=horizon)
     schedule = build_schedule(view, recurring, start, end) if schedule is None else schedule
@@ -224,7 +234,8 @@ def run_forecast(view: View, recurring: list[RecurringItem], schedule: list[Sche
             fc.assumptions.append({"key": "loan_cash_earmarked", "account_id": a, "amount_paise": earmarked,
                                    "text": "Assumes the recent loan money goes to its purpose, so it is left out of "
                                            "the forecast. If you keep it, see the alternative."})
-        sims[a] = simulate_account(view, a, opening - earmarked, schedule, pools.get(a), horizon, n_paths, seed_parts)
+        sims[a] = simulate_account(view, a, opening - earmarked, schedule, pools.get(a), horizon, n_paths, seed_parts,
+                                   (payout_share or {}).get(a, 0.0))
 
     paths = sims[op.account_id].paths
     fc.dates = sims[op.account_id].dates
@@ -258,7 +269,7 @@ def run_forecast(view: View, recurring: list[RecurringItem], schedule: list[Sche
     # D33: the alternative next to the assumption: the same forecast (same draws) if the loan cash is kept
     if earmarks.get(op.account_id):
         kept = simulate_account(view, op.account_id, op.balance_paise, schedule, pools.get(op.account_id), horizon,
-                                n_paths, seed_parts)
+                                n_paths, seed_parts, (payout_share or {}).get(op.account_id, 0.0))
         fc.dip_probability_if_kept = _dip(kept.paths, op.balance_paise, window, view.floor_paise)
         for a in fc.assumptions:
             if a["key"] == "loan_cash_earmarked" and a["account_id"] == op.account_id:

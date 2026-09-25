@@ -4,3 +4,9 @@ tele_manas:
   numbers: ["14416", "1-800-891-4416"]
   facts: free, 24x7, multilingual
   verified: 2026-09-23  # approved in the Phase 0 review
+emergency:
+  name: ERSS
+  number: "112"
+  facts: India's national emergency number
+  shown_in: [distress]  # tier 1 only; in a tier-2 check-in it would be alarming (Phase 5 review)
+  approved: 2026-09-25

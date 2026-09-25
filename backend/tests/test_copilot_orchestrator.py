@@ -25,21 +25,22 @@ def results(messages) -> dict:
 
 
 def golden_respond(emi_display=None):
-    """A model that answers from the tool results it was given (ids and display strings)."""
+    """A model that answers from the tool results it was given: the user's what-if as conditional PREDICTIONs."""
     def step(system, messages):
         sim = results(messages)["sim"]
         rate = next(a for a in sim["assumptions"] if a["kind"] == "assumption")
         emi = emi_display or sim["emi"]["display"]
         return call("respond", {"language": "hinglish", "statements": [
-            {"label": "RECOMMENDATION",
-             "text": f"{sim['principal']['display']} {sim['tenure']['display']} ke liye: EMI {emi} hogi, aur EMIs "
-                     f"aapki income ka {sim['emis_share_of_income_after']['display']} ho jayengi. Ye saalana "
-                     f"{rate['display']} byaaj maan kar hai.",
+            {"label": "PREDICTION",
+             "text": f"Agar aap {sim['tenure']['display']} ke liye {sim['principal']['display']} udhaar lete hain, "
+                     f"toh EMI {emi} hogi, aur EMIs aapki income ka {sim['emis_share_of_income_after']['display']} ho "
+                     f"jayengi (confidence: Medium). Ye saalana {rate['display']} byaaj maan kar hai.",
              "refs": [sim["principal"]["id"], sim["tenure"]["id"], sim["emi"]["id"],
                       sim["emis_share_of_income_after"]["id"], rate["id"]]},
-            {"label": "RECOMMENDATION",
-             "text": f"{sim['longer_tenure_option']['tenure']['display']} ke liye EMI "
-                     f"{sim['longer_tenure_option']['emi']['display']} hogi (saalana {rate['display']} byaaj par).",
+            {"label": "PREDICTION",
+             "text": f"Agar aap ise {sim['longer_tenure_option']['tenure']['display']} ke liye lete hain, toh EMI "
+                     f"{sim['longer_tenure_option']['emi']['display']} hogi (confidence: Medium; saalana "
+                     f"{rate['display']} byaaj par).",
              "refs": [sim["longer_tenure_option"]["tenure"]["id"], sim["longer_tenure_option"]["emi"]["id"],
                       rate["id"]]}]}, "resp")
     return step
@@ -136,10 +137,23 @@ def test_golden_question_without_an_llm(copilot, copilot_world):
     ans = copilot(NoneClient()).ask("demo-a", GOLDEN)
     assert ans.path == "template" and ans.language == "hinglish" and ans.intent == "afford_emi"
     labels = [s["label"] for s in ans.statements]
-    assert labels[0] == "FACT" and "PREDICTION" in labels and labels.count("RECOMMENDATION") >= 2
-    recs = [s["text"] for s in ans.statements if s["label"] == "RECOMMENDATION"]
-    assert "EMI ₹5,415" in recs[0] and "18 mahine" in recs[1] and "₹3,743" in recs[1]
-    assert all("15%" in r for r in recs)  # item 8: the assumed rate is stated
+    assert labels[0] == "FACT" and "PREDICTION" in labels and "RECOMMENDATION" in labels
+    what_ifs = [s["text"] for s in ans.statements if s["label"] == "PREDICTION" and s["text"].startswith("Agar")]
+    assert any("EMI ₹5,415" in t for t in what_ifs) and any("18 mahine" in t and "₹3,743" in t for t in what_ifs)
+    assert all("15%" in t and "confidence: Medium" in t for t in what_ifs)  # condition, confidence, assumption
     assert ans.final_errors == [] and all(r in ans.sources for s in ans.statements for r in s["refs"])
     with copilot_world.sf() as s:
         assert s.scalar(select(func.count()).select_from(AskLog)) == before + 1
+
+
+def test_the_question_deadline_serves_the_template(copilot_world, categoriser):
+    """Fix 8: a slow model can't hold the user past the per-question deadline."""
+    import time
+
+    def slow(system, messages):
+        time.sleep(0.4)
+        return call("get_metrics", {}, "m1")
+    fake = FakeLLM([slow, slow, slow])
+    ans = Copilot(copilot_world.sf, categoriser, fake, persist=False, deadline_s=0.6).ask("demo-a", GOLDEN)
+    assert ans.path == "template" and ans.fallback_reason == "deadline" and ans.statements
+    assert fake.timeouts[0] <= 0.6 and len(fake.timeouts) <= 2  # each call gets at most what is left

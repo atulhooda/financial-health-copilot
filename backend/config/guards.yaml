@@ -37,12 +37,14 @@ scope:  # securities, crypto, tips, promised returns: not a SEBI-registered inve
 messages:
   distress:
     en: "I'm really sorry you're feeling this way. You don't have to face this alone. Please talk to someone now:
-      {helpline} is free, 24x7 and multilingual. Call {numbers}. The money questions can wait."
+      {helpline} is free, 24x7 and multilingual. Call {numbers}. If you are in immediate danger, call {emergency}.
+      The money questions can wait."
     hinglish: "Mujhe bahut afsos hai ki aap aisa mehsoos kar rahe hain. Aap akele nahi hain. Abhi kisi se baat
-      kijiye: {helpline} free hai, 24x7 aur kai bhashaon mein. {numbers} par call karein. Paison ki baat baad mein ho
-      sakti hai."
+      kijiye: {helpline} free hai, 24x7 aur kai bhashaon mein. {numbers} par call karein. Agar aap turant khatre mein
+      hain, toh {emergency} par call karein. Paison ki baat baad mein ho sakti hai."
     hi: "मुझे बहुत दुख है कि आप ऐसा महसूस कर रहे हैं। आप अकेले नहीं हैं। अभी किसी से बात कीजिए: {helpline} मुफ़्त है,
-      24x7 और कई भाषाओं में। {numbers} पर कॉल करें। पैसों की बात बाद में हो सकती है।"
+      24x7 और कई भाषाओं में। {numbers} पर कॉल करें। अगर आप तुरंत ख़तरे में हैं, तो {emergency} पर कॉल करें। पैसों की बात
+      बाद में हो सकती है।"
   checkin:
     en: "Money stress like this is heavy. If it ever feels like too much, {helpline} is free and 24x7: {numbers}."
     hinglish: "Paison ka aisa stress bhaari hota hai. Agar kabhi bahut zyada lage, toh {helpline} se baat karein

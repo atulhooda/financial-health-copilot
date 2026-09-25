@@ -63,11 +63,13 @@ def _helpline() -> tuple[str, list[str]]:
 
 
 def message(kind: str, language: str) -> str:
-    """kind: distress | checkin | scope. Fixed text from config, never generated."""
+    """kind: distress | checkin | scope. Fixed text from config, never generated. Only the tier-1 (distress)
+    message carries the emergency number 112; a tier-2 check-in stays Tele-MANAS only."""
     cfg = load_yaml("guards")["messages"]
     name, nums = _helpline()
     numbers = cfg["numbers_joiner"][language].join(nums)
-    return " ".join(cfg[kind][language].split()).format(helpline=name, numbers=numbers)
+    emergency = load_yaml("helplines")["emergency"]["number"]
+    return " ".join(cfg[kind][language].split()).format(helpline=name, numbers=numbers, emergency=emergency)
 
 
 def scope_suggestions(language: str) -> list[str]:

@@ -50,6 +50,8 @@ def test_messages_carry_the_verified_helpline(language):
     for kind in ("distress", "checkin"):
         m = message(kind, language)
         assert "Tele-MANAS" in m and "14416" in m and "1-800-891-4416" in m
+    assert "112" in message("distress", language)  # tier 1: "if you are in immediate danger, call 112"
+    assert "112" not in message("checkin", language)  # tier 2: Tele-MANAS only; 112 there would be alarming
     assert "SEBI" in message("scope", language)
 
 

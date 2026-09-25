@@ -26,7 +26,7 @@ Impact     { "annual_impact": Quantity,            // interest saved - savings i
              "monthly_cashflow": Quantity, "card_interest_saved_12m": Quantity, "loan_interest_saved_12m": Quantity,
              "savings_interest_foregone_12m": Quantity, "lifetime_cost": Quantity|null,
              "score_now": Quantity, "score_12m_baseline": Quantity, "score_12m_with_action": Quantity,
-             "score_delta_12m": Quantity,          // projected scores: always RECOMMENDATION (D10)
+             "score_delta_12m": Quantity,          // projected scores: never FACT; label by who proposed the action (D10)
              "months_to_clear_card": Quantity|null, "buffer_months_now_after": Quantity,
              "buffer_months_12m_baseline": Quantity, "buffer_months_12m_with_action": Quantity,
              "bounce_risk_before": Quantity, "bounce_risk_after": Quantity,   // largest NACH/ACH mandate risk (D34)

@@ -121,21 +121,57 @@ def _print_answer(ans, llm) -> None:
 
 @app.command("eval-copilot")
 def eval_copilot(provider: str | None = typer.Option(None, "--provider", help="default: LLM_PROVIDER"),
+                 model: str | None = typer.Option(None, "--model", help="default: LLM_MODEL"),
+                 base_url: str | None = typer.Option(None, "--base-url", help="openai_compat: default LLM_BASE_URL"),
+                 api_key_env: str | None = typer.Option(None, "--api-key-env",
+                                                        help="NAME of the env var holding the key (never the key)"),
+                 label: str | None = typer.Option(None, "--label", help="name for this run in the report"),
+                 candidates: bool = typer.Option(False, "--candidates",
+                                                 help="run every candidate in config/copilot.yaml that has a key"),
                  user: str = typer.Option("demo-a", "--user"),
                  out: str = typer.Option("docs/COPILOT_EVAL.md", "--out", help="report path (repo-relative)")) -> None:
-    """Run the 30-question eval (config/copilot_eval.yaml) and write the report (Phase 5 item 7)."""
-    from app.copilot.eval import run_eval, write_report
+    """Run the 30-question eval (Phase 5 items 7 and 9); record every run and rank the candidates."""
+    from app.copilot.eval import HISTORY, deadline_from, ranked, record, run_eval, write_report
     from app.copilot.llm import LLMUnavailable, get_llm
+    from app.core.config import load_yaml, secret
 
-    try:
-        llm = get_llm(provider)
-    except LLMUnavailable as e:
-        raise typer.Exit(_fail(str(e))) from e
-    result = run_eval(llm, user)
+    jobs: list[tuple[str | None, dict]] = []
+    if candidates:
+        for c in load_yaml("copilot")["eval_candidates"]:
+            key = secret(c["api_key_env"])
+            mdl = c.get("model") or (secret(c["model_env"]) if c.get("model_env") else None)
+            url = secret(c["base_url_env"]) if c.get("base_url_env") else None
+            missing = [n for n, v in ((c["api_key_env"], key), (c.get("model_env"), mdl),
+                                      (c.get("base_url_env"), url if c.get("base_url_env") else True)) if n and not v]
+            if missing:
+                typer.echo(f"skip {c['label']}: {', '.join(missing)} not set (env or backend/.env)")
+                continue
+            jobs.append((c["label"], {"provider": c["provider"], "model": mdl, "base_url": url, "api_key": key}))
+    else:
+        jobs.append((label, {"provider": provider, "model": model, "base_url": base_url,
+                             "api_key": secret(api_key_env) if api_key_env else None}))
+    runs = None
+    for name, cfg in jobs:
+        try:
+            llm = get_llm(**cfg)
+        except LLMUnavailable as e:
+            raise typer.Exit(_fail(str(e))) from e
+        typer.echo(f"running {name or llm.provider} ({llm.model}) ...")
+        result = run_eval(llm, user, label=name)
+        runs = record(result)
+        m = result["metrics"]
+        typer.echo(json.dumps({k: m.get(k) for k in ("template_fallback_rate", "first_draft_block_rate",
+                                                     "first_draft_label_rule_violations", "p95_latency_ms_answered",
+                                                     "cost_usd_per_question", "delivered_label_rule_violations")},
+                              ensure_ascii=False))
+    if runs is None:
+        runs = json.loads(HISTORY.read_text(encoding="utf-8")) if HISTORY.exists() else []
     path = REPO_DIR / out
-    write_report(result, path)
-    typer.echo(json.dumps(result["metrics"], indent=1, ensure_ascii=False))
-    typer.echo(f"wrote {path}")
+    write_report(runs, path)
+    best = ranked(runs)
+    if best:
+        typer.echo(f"pick: {best[0]['label']}; suggested COPILOT_DEADLINE_S={deadline_from(best[0])}")
+    typer.echo(f"wrote {path} ({len(runs)} runs recorded in {HISTORY.name})")
 
 
 def _fail(msg: str) -> int:

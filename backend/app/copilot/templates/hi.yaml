@@ -21,22 +21,29 @@ intents:
       when: bounce.m1.probability
       text: "नई EMI से पहले ही, {bounce.m1.due} को {=bounce.m1.name} के {bounce.m1.amount} के भुगतान के बाउंस होने की
         संभावना {bounce.m1.probability} है ({@confidence})।"
-    - label: RECOMMENDATION
+    - label: PREDICTION
       when: sim.new_emi.score_delta
-      text: "{sim.new_emi.tenure} के लिए {sim.new_emi.principal} उधार लेने पर EMI {sim.new_emi.emi} होगी: EMI आपकी
-        आय का {sim.new_emi.eti_after} ले लेंगी, और साल भर बाद आपका स्कोर {sim.new_emi.score_base} की जगह
-        {sim.new_emi.score_with} होगा।"
-    - label: RECOMMENDATION
+      text: "अगर आप {sim.new_emi.tenure} के लिए {sim.new_emi.principal} उधार लेते हैं, तो EMI {sim.new_emi.emi} होगी:
+        EMI आपकी आय का {sim.new_emi.eti_after} ले लेंगी, और साल भर बाद आपका स्कोर {sim.new_emi.score_base} की जगह
+        {sim.new_emi.score_with} होगा ({@label:sim.new_emi})।"
+    - label: PREDICTION
       unless: sim.new_emi.score_delta
-      text: "{sim.new_emi.tenure} के लिए {sim.new_emi.principal} उधार लेने पर EMI {sim.new_emi.emi} होगी, और EMI
-        आपकी आय का {sim.new_emi.eti_after} ले लेंगी।"
-    - label: RECOMMENDATION
-      text: "{sim.new_emi.alt_tenure} के लिए EMI {sim.new_emi.alt_emi} होगी।"
+      text: "अगर आप {sim.new_emi.tenure} के लिए {sim.new_emi.principal} उधार लेते हैं, तो EMI {sim.new_emi.emi} होगी,
+        और EMI आपकी आय का {sim.new_emi.eti_after} ले लेंगी ({@label:sim.new_emi})।"
+    - label: PREDICTION
+      when: sim.new_emi.bounce_after
+      text: "अगर आप यह EMI लेते हैं, तो EMI बाउंस का सबसे बड़ा ख़तरा {sim.new_emi.bounce_after} होगा
+        ({=sim.new_emi.top_bounce_name}), जबकि अभी {sim.new_emi.bounce_before} है ({@label:sim.new_emi})।"
+    - label: PREDICTION
+      text: "अगर आप इसे {sim.new_emi.alt_tenure} के लिए लेते हैं, तो EMI {sim.new_emi.alt_emi} होगी
+        ({@label:sim.new_emi})।"
     - label: RECOMMENDATION
       when: =sim.new_emi.advice
       text: "सैलरी की तारीख़ के ठीक बाद की EMI तारीख़ माँगें: पहली EMI {sim.new_emi.date.after_payday} को हो तो बाउंस
         का ख़तरा {sim.new_emi.date.after_payday.risk} है, जबकि {sim.new_emi.date.in_30_days} को
         {sim.new_emi.date.in_30_days.risk}।"
+    - label: RECOMMENDATION
+      rec: top
   where_money:
     - label: FACT
       text: "पिछले महीने आपने {spend.total} ख़र्च किए। सबसे बड़े ख़र्च: {=spend.1.category} {spend.1.amount},
@@ -127,10 +134,18 @@ recs:
     बचेगा।"
   auto_sweep.savings.flat: "सैलरी के दिन {.amount} बचत में डालें: साल भर बाद आपकी आपातकालीन बचत {.buffer_12m_base} की
     जगह {.buffer_12m_with} के ख़र्च जितनी होगी।"
+  auto_sweep.savings.payout: "हर भुगतान का {.share} बचत में डालें (महीने में लगभग {.amount}): साल भर बाद स्कोर
+    {.score_base} की जगह {.score_with} होगा।"
+  auto_sweep.savings.payout.flat: "हर भुगतान का {.share} बचत में डालें (महीने में लगभग {.amount}): साल भर बाद आपकी
+    आपातकालीन बचत {.buffer_12m_base} की जगह {.buffer_12m_with} के ख़र्च जितनी होगी।"
+  auto_sweep.payout: "हर भुगतान का {.share} कार्ड में भेजें (महीने में लगभग {.amount}): साल भर बाद स्कोर {.score_base}
+    की जगह {.score_with} होगा।"
+  auto_sweep.payout.flat: "हर भुगतान का {.share} कार्ड में भेजें (महीने में लगभग {.amount}): साल भर में
+    {.card_interest_saved} का कार्ड-ब्याज बचेगा।"
   cancel_overlapping_subs: "{=.keep} रखें और {=.cancel} बंद करें: इससे हर महीने {.amount} बचेंगे, साल भर में
     {.annual}।"
-  change_emi_tenure: "सिर्फ़ विचार के लिए: {=.loan} लोन को {.extra_months} बढ़ाने से EMI {.old_emi} से घटकर
-    {.new_emi} होगी, पर {.extra_interest} ज़्यादा ब्याज लगेगा।"
+  change_emi_tenure: "अगर आप {=.loan} लोन को {.extra_months} बढ़ाते हैं, तो EMI {.old_emi} से घटकर {.new_emi} होगी, पर
+    {.extra_interest} ज़्यादा ब्याज लगेगा ({@label:.})।"
 
 tradeoffs:
   link_account: "इसमें पैसों का कोई ट्रेड-ऑफ़ नहीं: लिंक करने से हम बस {.known} में से {.linked_after} खाते देख
@@ -145,5 +160,5 @@ tradeoffs:
     {.bounce_after} होगा।"
   auto_sweep.fallback: "ट्रेड-ऑफ़: हर सैलरी के बाद खाते में {.amount} कम रहेंगे।"
   cancel_overlapping_subs: "ट्रेड-ऑफ़ बस इतना कि वे ऐप नहीं रहेंगे; बचत हर महीने {.amount} की है।"
-  change_emi_tenure: "ट्रेड-ऑफ़: अभी छोटी EMI ({.old_emi} की जगह {.new_emi}), पर {.extra_interest} ज़्यादा ब्याज, और
-    {.extra_months} ज़्यादा समय तक कर्ज़।"
+  change_emi_tenure: "अगर आप इसे बढ़ाते हैं, तो {.extra_months} ज़्यादा समय तक कर्ज़ रहेगा और {.extra_interest} ज़्यादा
+    ब्याज लगेगा, बदले में EMI {.old_emi} की जगह {.new_emi} होगी ({@label:.})।"

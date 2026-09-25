@@ -37,24 +37,25 @@ class OpenAICompatClient:
         self.model, self.base_url = model, base_url or ""
         self.client = client or sdk.OpenAI(api_key=api_key, base_url=base_url or None, timeout=timeout, max_retries=1)
 
-    def _create(self, system: str, messages: list[dict], tools: list[dict], choice: str):
+    def _create(self, system: str, messages: list[dict], tools: list[dict], choice: str, timeout: float | None):
+        extra = {"timeout": timeout} if timeout is not None else {}
         return self.client.chat.completions.create(
             model=self.model, temperature=0, messages=_messages(system, messages), tool_choice=choice,
             tools=[{"type": "function", "function": {"name": t["name"], "description": t["description"],
-                                                     "parameters": t["input_schema"]}} for t in tools])
+                                                     "parameters": t["input_schema"]}} for t in tools], **extra)
 
     def chat(self, system: str, messages: list[dict], tools: list[dict],
-             tool_choice: Literal["any", "auto"]) -> LLMReply:
+             tool_choice: Literal["any", "auto"], timeout: float | None = None) -> LLMReply:
         o = self._sdk
         key = (self.base_url, self.model)
         choice = "auto" if tool_choice == "auto" or key in _NO_REQUIRED else "required"
         try:
             try:
-                resp = self._create(system, messages, tools, choice)
+                resp = self._create(system, messages, tools, choice, timeout)
             except o.BadRequestError as e:
                 if choice == "required" and "tool_choice" in str(e):
                     _NO_REQUIRED.add(key)
-                    resp = self._create(system, messages, tools, "auto")
+                    resp = self._create(system, messages, tools, "auto", timeout)
                 else:
                     raise
         except o.APIStatusError as e:

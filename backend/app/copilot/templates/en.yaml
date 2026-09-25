@@ -24,22 +24,29 @@ intents:
       when: bounce.m1.probability
       text: "Even before a new EMI, your {=bounce.m1.name} payment of {bounce.m1.amount} due {bounce.m1.due} has a
         {bounce.m1.probability} chance of bouncing ({@confidence})."
-    - label: RECOMMENDATION
+    - label: PREDICTION
       when: sim.new_emi.score_delta
-      text: "Borrowing {sim.new_emi.principal} over {sim.new_emi.tenure} means an EMI of {sim.new_emi.emi}: EMIs
+      text: "If you borrow {sim.new_emi.principal} over {sim.new_emi.tenure}, the EMI would be {sim.new_emi.emi}: EMIs
         would take {sim.new_emi.eti_after} of your income, and your score a year from now would be
-        {sim.new_emi.score_with} instead of {sim.new_emi.score_base}."
-    - label: RECOMMENDATION
+        {sim.new_emi.score_with} instead of {sim.new_emi.score_base} ({@label:sim.new_emi})."
+    - label: PREDICTION
       unless: sim.new_emi.score_delta
-      text: "Borrowing {sim.new_emi.principal} over {sim.new_emi.tenure} means an EMI of {sim.new_emi.emi}: EMIs
-        would take {sim.new_emi.eti_after} of your income."
-    - label: RECOMMENDATION
-      text: "Over {sim.new_emi.alt_tenure} the EMI would be {sim.new_emi.alt_emi} instead."
+      text: "If you borrow {sim.new_emi.principal} over {sim.new_emi.tenure}, the EMI would be {sim.new_emi.emi}, and
+        EMIs would take {sim.new_emi.eti_after} of your income ({@label:sim.new_emi})."
+    - label: PREDICTION
+      when: sim.new_emi.bounce_after
+      text: "If you take it, the biggest EMI bounce risk would be {sim.new_emi.bounce_after}
+        ({=sim.new_emi.top_bounce_name}), against {sim.new_emi.bounce_before} now ({@label:sim.new_emi})."
+    - label: PREDICTION
+      text: "If you take it over {sim.new_emi.alt_tenure} instead, the EMI would be {sim.new_emi.alt_emi}
+        ({@label:sim.new_emi})."
     - label: RECOMMENDATION
       when: =sim.new_emi.advice
       text: "Ask for an EMI date right after your salary date: the new EMI's bounce risk would be
         {sim.new_emi.date.after_payday.risk} with a first EMI on {sim.new_emi.date.after_payday}, against
         {sim.new_emi.date.in_30_days.risk} on {sim.new_emi.date.in_30_days}."
+    - label: RECOMMENDATION
+      rec: top
   where_money:
     - label: FACT
       text: "In the past month you spent {spend.total}. The biggest items: {=spend.1.category} {spend.1.amount},
@@ -130,9 +137,17 @@ recs:
     over a year."
   auto_sweep.savings.flat: "On payday, move {.amount} to savings: a year from now your emergency buffer would be
     {.buffer_12m_with} instead of {.buffer_12m_base}."
+  auto_sweep.savings.payout: "Move {.share} of each payout to savings (about {.amount} a month): your score a year
+    from now would be {.score_with} instead of {.score_base}."
+  auto_sweep.savings.payout.flat: "Move {.share} of each payout to savings (about {.amount} a month): a year from now
+    your emergency buffer would be {.buffer_12m_with} instead of {.buffer_12m_base}."
+  auto_sweep.payout: "Send {.share} of each payout to the card (about {.amount} a month): your score a year from now
+    would be {.score_with} instead of {.score_base}."
+  auto_sweep.payout.flat: "Send {.share} of each payout to the card (about {.amount} a month): that saves
+    {.card_interest_saved} of card interest over a year."
   cancel_overlapping_subs: "Keep {=.keep} and cancel {=.cancel}: that saves {.amount} a month, {.annual} over a year."
-  change_emi_tenure: "Only to explore: extending your {=.loan} loan by {.extra_months} would cut the EMI from
-    {.old_emi} to {.new_emi}, but costs {.extra_interest} more in interest."
+  change_emi_tenure: "If you extend your {=.loan} loan by {.extra_months}, the EMI would drop from {.old_emi} to
+    {.new_emi}, but you'd pay {.extra_interest} more in interest ({@label:.})."
 
 tradeoffs:
   link_account: "There is no money trade-off: linking only lets us see {.linked_after} of {.known} accounts."
@@ -146,5 +161,5 @@ tradeoffs:
     {.bounce_after}."
   auto_sweep.fallback: "The trade-off: {.amount} less in your account after each payday."
   cancel_overlapping_subs: "The only trade-off is losing those apps; the saving is {.amount} a month."
-  change_emi_tenure: "The trade-off: a smaller EMI now ({.new_emi} instead of {.old_emi}) but {.extra_interest} more
-    interest, and you owe for {.extra_months} longer."
+  change_emi_tenure: "If you extend it, you'd owe for {.extra_months} longer and pay {.extra_interest} more interest,
+    for an EMI of {.new_emi} instead of {.old_emi} ({@label:.})."

@@ -72,12 +72,14 @@ def test_new_emi_what_if_matches_the_formula_and_states_its_rate(replayed):
 def test_clearing_the_card_is_cash_neutral_explicit_and_honest(replayed):
     ctx = replayed(1)
     (a,) = gen_pay_down_card(ctx)
-    nid = ctx.forecast.next_income_date
-    due_before = sum(f.amount_paise for f in ctx.forecast.schedule if f.direction == "debit" and f.date < nid
-                     and f.kind != "card_payment")
-    uncovered = max(0, due_before - ctx.view.operating.balance_paise)
+    fc, nid = ctx.forecast, ctx.forecast.next_income_date
+    # Phase 5 review: "can't cover" is the forecast's P10 end-of-day balance on each debit's due date going below 0
+    due = {f.date for f in fc.schedule if f.direction == "debit" and f.account_id == fc.account_id and f.date < nid}
+    shortfall = max([-fc.p10[fc.dates.index(d)] for d in due if d in fc.dates] or [0])
+    cushion = -(-(ctx.view.floor_paise + max(0, shortfall)) // 500_00) * 500_00
     post = a.extra["post_clear_check"]
-    assert a.params["cushion_paise"] == ctx.view.floor_paise + uncovered + post["extra_cushion_paise"]
+    assert shortfall > 0  # A spends down: today's balance overstates what will be there
+    assert a.params["cushion_paise"] == cushion + post["extra_cushion_paise"]
     assert a.params["clears"] and a.params["amount_paise"] >= ctx.card.revolving_paise
     assert a.params["steps"][1] == "Set card autopay to the full statement amount"  # fix 3: step 2 explicit
     r = evaluate(ctx, a)
@@ -114,18 +116,66 @@ def test_d26_freed_cash_is_half_spent_unless_swept(replayed):
     assert expected <= gain <= expected * 1.02  # plus savings interest compounding on the difference
 
 
-def test_sweep_size_is_the_largest_step_within_the_bounce_limit(replayed):
+def test_sweep_size_is_the_largest_step_within_the_bounce_limit(replayed, monkeypatch):
+    from app.engines import simulate
     from app.engines.simulate import _rerun
 
     ctx = replayed(2)
-    x = _size_sweep(ctx, to_card=True)
+    assert _size_sweep(ctx, to_card=True) == (0, "surplus")  # A has no observed surplus to sweep (fix 6)
+    monkeypatch.setattr(simulate, "surplus_limit", lambda m: 30_000_00)  # pretend there is one: the risk rule binds
+    x, binding = _size_sweep(ctx, to_card=True)
     base = max_mandate_bounce(ctx.forecast)
 
     def rise(amount):
         return max_mandate_bounce(_rerun(ctx, _with_sweep(ctx, ctx.forecast.schedule, amount, True))) - base
     step = ctx.cfg["sweep_step_paise"]
-    assert (x == 0 or rise(x) <= 0.02 + 1e-9) and rise(x + step) > 0.02
+    assert binding == "bounce_risk" and (x == 0 or rise(x) <= 0.02 + 1e-9) and rise(x + step) > 0.02
     assert [a.params["amount_paise"] for a in gen_auto_sweep(ctx)] == ([x] if x >= 1_000_00 else [])
+
+
+def _persona_ctx(sf, uid, categoriser):
+    from app.demo.personas import BC_AS_OF
+
+    with sf() as session:
+        v = build_view(session, uid, BC_AS_OF, categoriser)
+        m = compute_metrics(v)
+        fc, conf, _ = forecast_with_confidence(v, m.recurring, m.coverage)
+        return build_context(v, m, compute_score(m), fc, conf)
+
+
+def test_the_search_cap_is_never_what_sizes_a_sweep(replayed, copilot_world, categoriser):
+    """Fix 6: a 45-day forecast can't see an account draining over months, so the observed surplus limits the
+    sweep. This fails if the search cap is ever the binding constraint, for A at every step, B and C."""
+    from app.engines.simulate import SWEEP_MAX_STEPS, _size_payout_share, surplus_limit
+
+    contexts = [replayed(i) for i in range(4)] + [_persona_ctx(copilot_world.sf, u, categoriser)
+                                                  for u in ("demo-b", "demo-c")]
+    for ctx in contexts:
+        if ctx.metrics.income_pattern == "irregular":
+            bps, binding = _size_payout_share(ctx)
+            assert bps <= max(0.0, surplus_limit(ctx.metrics)) * 10000
+        else:
+            x, binding = _size_sweep(ctx, bool(ctx.card and ctx.card.revolving_paise))
+            limit = surplus_limit(ctx.metrics)
+            assert x <= max(0, limit or 0) and x < SWEEP_MAX_STEPS * ctx.cfg["sweep_step_paise"]
+        assert binding != "cap", (ctx.view.user_id, ctx.view.as_of)
+    c = contexts[-1]
+    (sweep,) = gen_auto_sweep(c)
+    assert sweep.params["binding"] == "surplus" and sweep.params["amount_paise"] <= surplus_limit(c.metrics)
+
+
+def test_irregular_income_sweeps_a_share_of_each_payout(copilot_world, categoriser, monkeypatch):
+    from app.engines import simulate
+
+    ctx = _persona_ctx(copilot_world.sf, "demo-b", categoriser)
+    assert ctx.metrics.income_pattern == "irregular"
+    assert gen_auto_sweep(ctx) == []  # B's low-percentile surplus is too thin for any sweep
+    monkeypatch.setattr(simulate, "surplus_limit", lambda m: 0.10)  # were it 10% of income
+    (a,) = gen_auto_sweep(ctx)
+    assert a.params["per"] == "payout" and 0 < a.params["share_bps"] <= 1000 and "of each payout" in a.title
+    assert a.params["amount_paise"] == round(a.params["share_bps"] / 10000 * ctx.metrics.income_monthly_paise)
+    r = evaluate(ctx, a)  # the forecast re-run sweeps that share of every drawn payout (same draws)
+    assert r.impact["dip_probability_after"] >= r.impact["dip_probability_before"]
 
 
 def test_tenure_extension_is_only_an_offered_what_if(replayed):

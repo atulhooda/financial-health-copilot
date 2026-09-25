@@ -16,6 +16,7 @@ from app.copilot.llm.base import LLMError, LLMReply, ToolCall
 
 MAX_TOKENS = 8000
 _NO_FORCED_TOOL_CHOICE: set[str] = set()
+_NO_EFFORT: set[str] = set()  # models that rejected output_config.effort (remembered for the process)
 
 
 def _content(m: dict) -> dict:
@@ -40,30 +41,38 @@ class AnthropicClient:
         self.client = client or sdk.Anthropic(api_key=api_key or None, base_url=base_url or None, timeout=timeout,
                                               max_retries=1)
 
-    def _create(self, system: str, messages: list[dict], tools: list[dict], choice: str):
+    def _create(self, system: str, messages: list[dict], tools: list[dict], choice: str, timeout: float | None):
         kwargs: dict = {
             "model": self.model, "max_tokens": MAX_TOKENS, "system": system,
             "messages": [_content(m) for m in messages],
             "tools": [{k: t[k] for k in ("name", "description", "input_schema", "strict") if k in t} for t in tools],
             "tool_choice": {"type": choice},
         }
-        if self.effort:
+        if self.effort and self.model not in _NO_EFFORT:
             kwargs["output_config"] = {"effort": self.effort}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
         return self.client.messages.create(**kwargs)
 
     def chat(self, system: str, messages: list[dict], tools: list[dict],
-             tool_choice: Literal["any", "auto"]) -> LLMReply:
+             tool_choice: Literal["any", "auto"], timeout: float | None = None) -> LLMReply:
         a = self._sdk
         choice = "auto" if self.model in _NO_FORCED_TOOL_CHOICE else tool_choice
         try:
-            try:
-                resp = self._create(system, messages, tools, choice)
-            except a.BadRequestError as e:
-                if choice == "any" and "tool_choice" in str(e):
-                    _NO_FORCED_TOOL_CHOICE.add(self.model)  # D16: remember, and fall back to auto
-                    resp = self._create(system, messages, tools, "auto")
-                else:
-                    raise
+            for _ in range(3):  # at most: forced tool choice rejected, then effort rejected
+                try:
+                    resp = self._create(system, messages, tools, choice, timeout)
+                    break
+                except a.BadRequestError as e:
+                    if choice == "any" and "tool_choice" in str(e):
+                        _NO_FORCED_TOOL_CHOICE.add(self.model)  # D16: remember, and fall back to auto
+                        choice = "auto"
+                    elif self.effort and self.model not in _NO_EFFORT and "effort" in str(e):
+                        _NO_EFFORT.add(self.model)  # this model has no effort control: run at its default
+                    else:
+                        raise
+            else:
+                raise LLMError("the request kept being rejected")
         except a.APIStatusError as e:  # 4xx/5xx incl. auth, permission, not found, rate limit, overloaded
             raise LLMError(f"{type(e).__name__} {e.status_code}: {getattr(e, 'message', e)}") from e
         except (a.APIConnectionError, a.APITimeoutError) as e:
