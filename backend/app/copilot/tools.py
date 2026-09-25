@@ -462,6 +462,7 @@ def describe_rec(ctx: ToolContext, rec: dict, kp: str, proposed: bool = True) ->
     ctx.texts[f"{kp}.type"] = t
     ctx.texts[f"{kp}.group"] = g
     ctx.texts[f"{kp}.proposed"] = proposed
+    ctx.texts[f"{kp}.raw"] = rec  # the evaluated simulation itself (the API presents it; never rendered)
     out: dict = {"rank": rec.get("rank"), "type": t,
                  "label_as": "RECOMMENDATION: an action Hisaab proposes" if proposed else
                  "PREDICTION: a what-if; phrase it with its condition ('If you …'), give its confidence label and "

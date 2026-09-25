@@ -9,7 +9,12 @@ make seed      # categoriser, personas A/B/C, A at T0
 make demo      # replay T0 → +3, print timeline, run golden ask (none + real LLM if key set)
 hisaab ask --user demo-a "Kya main ₹60,000 ka phone 12 months ki EMI pe le sakta hoon?"
 ```
-**No WiFi:** `LLM_PROVIDER=none make demo`. **No Redis:** `EVENT_BUS=inprocess make demo`. Both paths are exercised in CI.
+**No WiFi:** `LLM_PROVIDER=none make demo`. **No Redis:** `EVENT_BUS=inprocess make demo`. **Neither:** `make demo-offline`. All three paths are exercised by the tests. `make demo` also writes `docs/DEMO_NUMBERS.md` (the engine's numbers for every step, B and C, and the golden answer with its sources). The app can drive the same replay through the API: `DEMO_MODE=1 make api`, then `POST /v1/demo/replay/t0` … `/3`.
+
+### Demo-day runbook (Phase 5 review, D52)
+- **Key:** the demo machine has its **own** provider key, with a spending limit set in the provider's console. It lives only in that machine's `backend/.env` (gitignored; names in `backend/.env.example`), never in chat, logs or git. `make hooks` installs the pre-push secret scan.
+- **Model:** the one `hisaab eval-copilot --candidates` picked (`docs/COPILOT_EVAL.md`), with `COPILOT_DEADLINE_S` set from its p95.
+- **Rehearse the fallback** before going on stage: `make demo-offline` (no Redis, no LLM) must print the full timeline and the golden answer from templates. If the network or the key fails live, answers fall back to templates by themselves (`fallback_reason` says why); nothing else changes, because every number comes from the engine either way.
 
 ## 2. Demo clock (SPEC D5, D41)
 The demo never reads wall-clock time. All time comes from the injected `FixedClock`. Seed: `HISAAB_SEED=20260920`. Every step is a slice of **one** simulated world (SPEC §9), so balances are continuous. **Every step sits 2–3 days after A's payday** (pre-Phase-5 fix 6): our pitch is early warning, with a month of runway, not a certainty 11 days out.
@@ -40,12 +45,13 @@ Persona A pays a home-tiffin service, **GHARGUTI DABBA**, ₹1,800 on the 3rd of
 ## 4. Golden question (after +3)
 `Kya main ₹60,000 ka phone 12 months ki EMI pe le sakta hoon?`
 - Language `hinglish`, intent `afford_emi`, user inputs U1 = ₹60,000 and U2 = 12 months.
-- Tools: get_metrics → forecast → simulate_action(new_emi, 60000, 12). Rate unspecified → assumption 15% p.a. (A1).
+- Tools: get_metrics → forecast → simulate_action(new_emi, 60000, 12) → list_recommendations(1). Rate unspecified → assumption 15% p.a. (A1).
 - EMI must equal **₹5,415 (±1)**. The alternative 18-month EMI is ₹3,743 (±1).
-- Expected shape (numbers filled from the engine at demo time, not written here):
+- Expected shape (numbers filled from the engine at demo time, not written here; the latest run is in `docs/DEMO_NUMBERS.md`):
   - FACT: income and current EMI-to-income.
-  - PREDICTION: dip probability before next salary, now vs with the phone EMI, with confidence.
-  - RECOMMENDATION: EMI at the assumed 15%, EMI-to-income after, score delta, the 18-month alternative, and the rate stated as an assumption.
+  - PREDICTION: the largest EMI bounce risk today, with confidence.
+  - **Conditional PREDICTIONs** (the user's what-if, D10 as corrected in the Phase 5 review): "If you borrow ₹60,000 over 12 months, the EMI would be ₹5,415 …" with EMI-to-income after and the projected score; "If you take it, the biggest EMI bounce risk would be X (Bajaj Finance), against Y now"; "If you take it over 18 months instead, the EMI would be ₹3,743". Each states its confidence and the assumed 15% rate.
+  - RECOMMENDATION: the EMI-date advice when D39 gives one, and Hisaab's own top recommendation.
 - It must pass the validator with a real LLM **and** with `LLM_PROVIDER=none` (template path).
 
 ## 5. Persona parameter changes log

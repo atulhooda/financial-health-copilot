@@ -145,6 +145,12 @@ recs:
     would be {.score_with} instead of {.score_base}."
   auto_sweep.payout.flat: "Send {.share} of each payout to the card (about {.amount} a month): that saves
     {.card_interest_saved} of card interest over a year."
+  new_emi: "If you borrow {.principal} over {.tenure}, the EMI would be {.emi}, and EMIs would take {.eti_after} of your
+    income ({@label:.})."
+  delay_purchase: "If you buy after your next payday instead of now, your largest EMI bounce risk would be
+    {.bounce_after} instead of {.bounce_before} ({@label:.})."
+  delay_purchase.fallback: "If you buy after your next payday instead of now, your EMI bounce risk stays about the
+    same ({@label:.})."
   cancel_overlapping_subs: "Keep {=.keep} and cancel {=.cancel}: that saves {.amount} a month, {.annual} over a year."
   change_emi_tenure: "If you extend your {=.loan} loan by {.extra_months}, the EMI would drop from {.old_emi} to
     {.new_emi}, but you'd pay {.extra_interest} more in interest ({@label:.})."

@@ -290,37 +290,7 @@ class Copilot:
         return snap
 
     def _simulator(self, user_id: str, snap):
-        cache: dict = {}
-
-        def simulate(kind: str, params: dict) -> dict | None:
-            from app.engines.backtest import Confidence
-            from app.engines.financial import compute_metrics
-            from app.engines.forecast import run_forecast
-            from app.engines.score import compute_score
-            from app.engines.simulate import build_context, evaluate, what_if_delay_purchase, what_if_new_emi
-            from app.engines.view import build_view
-
-            if "ctx" not in cache:
-                with self.sf() as s:
-                    view = build_view(s, user_id, snap.as_of, self.categoriser,
-                                      max_ingest_seq=snap.payload["ingest_seq"])
-                m = compute_metrics(view)
-                fc, _ = run_forecast(view, m.recurring)
-                if not fc.available:
-                    return None
-                conf = Confidence(**snap.payload["confidence"])  # the snapshot's backtest: no need to re-run it
-                cache["ctx"] = build_context(view, m, compute_score(m), fc, conf)
-            c = cache["ctx"]
-            if kind == "new_emi":
-                action = what_if_new_emi(c, params["principal_paise"], params["tenure_months"],
-                                         params.get("annual_rate_bps"))
-            else:
-                buy_now = c.view.as_of + dt.timedelta(days=1)
-                after_payday = (c.forecast.next_income_date or buy_now) + dt.timedelta(days=1)
-                action = what_if_delay_purchase(c, params["amount_paise"], buy_now, after_payday)
-            return jsonable(evaluate(c, action))
-
-        return simulate
+        return make_simulator(self.sf, self.categoriser, user_id, snap)
 
     def _log(self, ans: Answer, attempts: list[dict], trace: dict) -> None:
         """ask_logs (masked trace), validator_blocks per blocked draft, and the anonymous global counter (D14)."""
@@ -379,3 +349,39 @@ def run_plan(ctx: ToolContext, intent: Intent) -> str | None:
         run_tool(ctx, "get_metrics", {})
         run_tool(ctx, "list_recommendations", {"limit": 1})
     return None
+
+
+def make_simulator(session_factory: sessionmaker[Session], categoriser: Categoriser | None, user_id: str, snap):
+    """What-ifs on the engine, point-in-time at the snapshot (its as_of and ingest watermark). The context is built
+    once per turn; the snapshot's own confidence is reused, so the backtest isn't re-run."""
+    cache: dict = {}
+
+    def simulate(kind: str, params: dict) -> dict | None:
+        from app.engines.backtest import Confidence
+        from app.engines.financial import compute_metrics
+        from app.engines.forecast import run_forecast
+        from app.engines.score import compute_score
+        from app.engines.simulate import build_context, evaluate, what_if_delay_purchase, what_if_new_emi
+        from app.engines.view import build_view
+
+        if "ctx" not in cache:
+            with session_factory() as s:
+                view = build_view(s, user_id, snap.as_of, categoriser, max_ingest_seq=snap.payload["ingest_seq"])
+            m = compute_metrics(view)
+            fc, _ = run_forecast(view, m.recurring)
+            if not fc.available:
+                return None
+            conf = Confidence(**snap.payload["confidence"])
+            cache["ctx"] = build_context(view, m, compute_score(m), fc, conf)
+        c = cache["ctx"]
+        if kind == "new_emi":
+            action = what_if_new_emi(c, params["principal_paise"], params["tenure_months"],
+                                     params.get("annual_rate_bps"))
+        else:
+            buy_now = c.view.as_of + dt.timedelta(days=1)
+            after_payday = (c.forecast.next_income_date or buy_now) + dt.timedelta(days=1)
+            action = what_if_delay_purchase(c, params["amount_paise"], buy_now, after_payday)
+        return jsonable(evaluate(c, action))
+
+    return simulate
+

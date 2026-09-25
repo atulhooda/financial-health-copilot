@@ -142,6 +142,12 @@ recs:
     की जगह {.score_with} होगा।"
   auto_sweep.payout.flat: "हर भुगतान का {.share} कार्ड में भेजें (महीने में लगभग {.amount}): साल भर में
     {.card_interest_saved} का कार्ड-ब्याज बचेगा।"
+  new_emi: "अगर आप {.tenure} के लिए {.principal} उधार लेते हैं, तो EMI {.emi} होगी, और EMI आपकी आय का {.eti_after} ले
+    लेंगी ({@label:.})।"
+  delay_purchase: "अगर आप अभी की जगह अगली सैलरी के बाद ख़रीदते हैं, तो EMI बाउंस का सबसे बड़ा ख़तरा {.bounce_before} की
+    जगह {.bounce_after} होगा ({@label:.})।"
+  delay_purchase.fallback: "अगर आप अभी की जगह अगली सैलरी के बाद ख़रीदते हैं, तो EMI बाउंस का ख़तरा लगभग वैसा ही रहेगा
+    ({@label:.})।"
   cancel_overlapping_subs: "{=.keep} रखें और {=.cancel} बंद करें: इससे हर महीने {.amount} बचेंगे, साल भर में
     {.annual}।"
   change_emi_tenure: "अगर आप {=.loan} लोन को {.extra_months} बढ़ाते हैं, तो EMI {.old_emi} से घटकर {.new_emi} होगी, पर

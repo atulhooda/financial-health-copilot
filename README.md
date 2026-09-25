@@ -17,6 +17,10 @@ uv run hisaab eval-copilot --candidates   # 30-question eval per candidate model
 Keys: copy `backend/.env.example` to `backend/.env` (gitignored) and fill it in; never commit keys or paste them into
 chat or logs. `make hooks` installs a pre-push secret scan; `make secret-scan` runs it by hand.
 
+API: `make api` serves v1 on :8000 (`/docs` for the OpenAPI UI; dev-only auth, send `X-User-Id: demo-a`). The contract
+is [docs/API.md](docs/API.md) plus the frozen [docs/openapi.json](docs/openapi.json). `make demo-offline` rehearses the
+demo with no Redis and no LLM.
+
 The copilot answers from templates when `LLM_PROVIDER=none` (the default). For a model, set `LLM_PROVIDER=anthropic`
 (or `openai_compat` with `LLM_BASE_URL`), `LLM_MODEL` and `LLM_API_KEY`; see [docs/COPILOT.md](docs/COPILOT.md).
 

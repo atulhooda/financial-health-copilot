@@ -40,6 +40,7 @@ class IngestResult:
     raw_new: int
     canonical_total: int
     duplicates_merged: int
+    event_id: str | None = None  # set once the recompute event is published
 
 
 LINK_RANK = {"known_unlinked": 0, "sms_only": 1, "linked": 2}

@@ -159,26 +159,35 @@ def render(intent: str, ctx: ToolContext, target: str | None = None) -> list[dic
             continue
         if "unless" in spec and _truthy(ctx, spec["unless"]):
             continue
-        filled, label = None, spec["label"]
         if "rec" in spec or "tradeoff" in spec:
             prefix = "rec.1" if spec.get("rec") == "top" else target or "rec.1"
-            if f"{prefix}.type" not in ctx.texts:
-                continue
-            # D10: label by who proposed it; a what-if Hisaab only offers to explore is a conditional PREDICTION
-            label = "RECOMMENDATION" if ctx.texts.get(f"{prefix}.proposed", True) else "PREDICTION"
-            table = t["recs"] if "rec" in spec else t["tradeoffs"]
-            for variant in _rec_variants(ctx, prefix, table):
-                filled = _fill(variant, ctx, prefix)
-                if filled is not None:
-                    break
-        else:
-            filled = _fill(spec["text"], ctx, None)
+            st = render_rec(ctx, prefix, "recs" if "rec" in spec else "tradeoffs")
+            if st is not None:
+                statements.append(st)
+            continue
+        filled = _fill(spec["text"], ctx, None)
         if filled is None:
             continue
-        text, refs = filled
-        if label in ("RECOMMENDATION", "PREDICTION"):
-            text, refs = _with_assumptions(ctx, text, refs)
-        if text[:1].isascii() and text[:1].islower():
-            text = text[0].upper() + text[1:]
-        statements.append({"label": label, "text": text, "refs": list(dict.fromkeys(refs))})
+        statements.append(_statement(ctx, spec["label"], *filled))
     return statements
+
+
+def render_rec(ctx: ToolContext, prefix: str, table_name: str = "recs") -> dict | None:
+    """One simulation described by the tools under `prefix` (rec.1, offer.1, sim.new_emi …) as a statement.
+    D10: an action Hisaab proposes is a RECOMMENDATION; a what-if is a conditional PREDICTION."""
+    if f"{prefix}.type" not in ctx.texts:
+        return None
+    label = "RECOMMENDATION" if ctx.texts.get(f"{prefix}.proposed", True) else "PREDICTION"
+    for variant in _rec_variants(ctx, prefix, templates(ctx.language)[table_name]):
+        filled = _fill(variant, ctx, prefix)
+        if filled is not None:
+            return _statement(ctx, label, *filled)
+    return None
+
+
+def _statement(ctx: ToolContext, label: str, text: str, refs: list[str]) -> dict:
+    if label in ("RECOMMENDATION", "PREDICTION"):
+        text, refs = _with_assumptions(ctx, text, refs)
+    if text[:1].isascii() and text[:1].islower():
+        text = text[0].upper() + text[1:]
+    return {"label": label, "text": text, "refs": list(dict.fromkeys(refs))}

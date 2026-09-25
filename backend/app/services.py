@@ -18,6 +18,6 @@ def ingest_and_publish(session_factory: sessionmaker, bus: EventBus, user_id: st
         result = ingest_batch(s, user_id, batch, categoriser, clock)
         seq = next_ingest_seq(UserRepo(s, user_id)) - 1
         s.commit()
-    bus.publish({"type": "data.ingested", "user_id": user_id, "source": source, "ingest_seq": seq,
-                 "as_of": clock.today().isoformat(), "trigger": trigger})
+    result.event_id = bus.publish({"type": "data.ingested", "user_id": user_id, "source": source, "ingest_seq": seq,
+                                   "as_of": clock.today().isoformat(), "trigger": trigger})
     return result

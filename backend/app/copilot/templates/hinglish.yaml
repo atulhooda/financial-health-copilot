@@ -143,6 +143,12 @@ recs:
     {.score_base} ki jagah {.score_with} hoga."
   auto_sweep.payout.flat: "Har payout ka {.share} card mein bhejiye (mahine mein lagbhag {.amount}): saal bhar mein
     {.card_interest_saved} ka card-byaaj bachega."
+  new_emi: "Agar aap {.tenure} ke liye {.principal} udhaar lete hain, toh EMI {.emi} hogi, aur EMIs aapki income ka
+    {.eti_after} le lengi ({@label:.})."
+  delay_purchase: "Agar aap abhi ki jagah agli salary ke baad kharidte hain, toh EMI bounce ka sabse bada khatra
+    {.bounce_before} ki jagah {.bounce_after} hoga ({@label:.})."
+  delay_purchase.fallback: "Agar aap abhi ki jagah agli salary ke baad kharidte hain, toh EMI bounce ka khatra lagbhag
+    waisa hi rahega ({@label:.})."
   cancel_overlapping_subs: "{=.keep} rakhiye aur {=.cancel} band kijiye: isse har mahine {.amount} bachenge, saal bhar
     mein {.annual}."
   change_emi_tenure: "Agar aap {=.loan} loan ko {.extra_months} badhate hain, toh EMI {.old_emi} se ghatkar {.new_emi}

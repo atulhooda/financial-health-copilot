@@ -52,22 +52,56 @@ def seed() -> None:
             typer.echo(f"{pid:7s} snapshot  {snap.snapshot_id} as_of {snap.as_of} score {snap.payload['score']['total']}")
 
 
+GOLDEN = "Kya main ₹60,000 ka phone 12 months ki EMI pe le sakta hoon?"
+
+
 @app.command()
-def demo() -> None:
-    """Replay persona A T0 -> +3 through the event bus and worker; print the timeline (docs/DEMO.md)."""
+def demo(write: bool = typer.Option(True, "--write/--no-write", help="write docs/DEMO_NUMBERS.md")) -> None:
+    """Replay persona A T0 -> +3 through the event bus and worker, print the timeline, ask the golden question
+    (templates, and the configured provider if one is set up), write docs/DEMO_NUMBERS.md (SPEC §10)."""
+    from app.copilot.llm import LLMUnavailable, get_llm
+    from app.copilot.llm.none import NoneClient
+    from app.copilot.orchestrator import Copilot
+    from app.core.config import get_settings
     from app.core.money import format_inr
     from app.db.session import get_engine, make_sessionmaker
+    from app.demo import report
     from app.demo.replay import replay
+    from app.engines import ENGINE_VERSION
     from app.events.bus import get_bus
+    from app.events.snapshots import latest_snapshot
     from app.pipeline.categorise.train import get_categoriser
 
     try:
         bus = get_bus()
     except Exception as e:  # noqa: BLE001
         raise typer.Exit(_fail(f"event bus unavailable ({e}); run `make up`, or EVENT_BUS=inprocess make demo")) from e
-    results = replay(make_sessionmaker(get_engine()), bus, get_categoriser())
+    sf, cat = make_sessionmaker(get_engine()), get_categoriser()
+    results = replay(sf, bus, cat)
     for r in results:
         _print_step(r, format_inr)
+    answers = []
+    none = NoneClient()
+    typer.echo(f"\n[ask] {GOLDEN}")
+    ans = Copilot(sf, cat, none).ask("demo-a", GOLDEN)
+    _print_answer(ans, none)
+    answers.append(("templates, LLM_PROVIDER=none", GOLDEN, ans))
+    if get_settings().llm_provider != "none":
+        try:
+            llm = get_llm()
+        except LLMUnavailable as e:
+            typer.echo(f"\n[ask] configured provider skipped: {e}")
+        else:
+            typer.echo(f"\n[ask] {GOLDEN} ({llm.provider} {llm.model})")
+            ans = Copilot(sf, cat, llm).ask("demo-a", GOLDEN)
+            _print_answer(ans, llm)
+            answers.append((f"{llm.provider}, {llm.model}", GOLDEN, ans))
+    if write:
+        with sf() as s:
+            others = {u: snap for u in ("demo-b", "demo-c") if (snap := latest_snapshot(s, u)) is not None}
+        path = REPO_DIR / "docs" / "DEMO_NUMBERS.md"
+        report.write(path, results, others, answers, ENGINE_VERSION, get_settings().seed)
+        typer.echo(f"\nwrote {path}")
 
 
 @app.command()
@@ -113,7 +147,8 @@ def _print_answer(ans, llm) -> None:
             for r in st["refs"]:
                 src = ans.sources.get(r)
                 if src:
-                    typer.echo(f"      {r:<4} {src['display']:<14} {src['kind']}: {src['desc']}")
+                    shown = "(in words)" if src["display"] == src["desc"] else src["display"]  # a yes/no assumption
+                    typer.echo(f"      {r:<4} {shown:<14} {src['kind']}: {src['desc']}")
     if ans.trace:
         typer.echo("\ntrace (masked):")
         typer.echo(json.dumps(ans.trace, ensure_ascii=False, indent=1, default=str))
@@ -172,6 +207,28 @@ def eval_copilot(provider: str | None = typer.Option(None, "--provider", help="d
     if best:
         typer.echo(f"pick: {best[0]['label']}; suggested COPILOT_DEADLINE_S={deadline_from(best[0])}")
     typer.echo(f"wrote {path} ({len(runs)} runs recorded in {HISTORY.name})")
+
+
+def openapi_json() -> str:
+    from app.api.main import create_app
+
+    return json.dumps(create_app().openapi(), indent=1, sort_keys=True, ensure_ascii=False) + "\n"
+
+
+@app.command("export-openapi")
+def export_openapi(out: str = typer.Option("docs/openapi.json", "--out")) -> None:
+    """Freeze the API contract (docs/API.md): a test fails if the app drifts from the committed file."""
+    path = REPO_DIR / out
+    path.write_text(openapi_json(), encoding="utf-8")
+    typer.echo(f"wrote {path}")
+
+
+@app.command()
+def serve(host: str = "127.0.0.1", port: int = 8000) -> None:
+    """Run the API (uvicorn). Auth is dev-only: send X-User-Id."""
+    import uvicorn
+
+    uvicorn.run("app.api.main:app", host=host, port=port)
 
 
 def _fail(msg: str) -> int:
