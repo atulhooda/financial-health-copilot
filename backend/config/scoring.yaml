@@ -1,0 +1,18 @@
+# Must match docs/SCORING.md (tests/test_score.py parses the doc tables and compares).
+version: 2
+bands: {Poor: 0, Fair: 50, Good: 70}   # lower bound of each band
+pillars:
+  savings:    {title: Savings, weight: 20, metric: savings_rate, unit: pct,
+               breakpoints: [[0, 0], [10, 50], [20, 75], [30, 100]]}
+  buffer:     {title: Emergency buffer, weight: 20, metric: buffer_months, unit: months,
+               breakpoints: [[0, 0], [1, 30], [3, 70], [6, 100]]}
+  debt:       {title: Debt load, weight: 20, metric: emi_to_income, unit: pct,
+               breakpoints: [[10, 100], [30, 60], [40, 30], [60, 0]]}
+  credit:     {title: Credit health, weight: 15, metric: credit_utilisation, unit: pct,
+               breakpoints: [[10, 100], [30, 75], [50, 40], [90, 0]],
+               revolving_breakpoints: [[0, 100], [5, 70], [15, 40], [30, 15], [50, 0]],
+               utilisation_share: 0.5}
+  liquidity:  {title: Pre-salary liquidity, weight: 15, metric: clean_cycle_share, unit: pct,
+               bounce_penalty: 25, min_cycles: 2}
+  stability:  {title: Spending stability, weight: 10, metric: discretionary_ratio, unit: ratio,
+               breakpoints: [[1.00, 100], [1.15, 70], [1.30, 40], [1.60, 0]]}

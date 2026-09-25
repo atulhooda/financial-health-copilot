@@ -1,0 +1,70 @@
+# Bank SMS patterns, shared by the Flutter app (on-device parser) and the Python reference parser.
+# Raw SMS never leaves the phone; the app sends only the structured fields (SPEC §4, D12, D13).
+#
+# PORTABILITY RULES (D13), enforced by tests/test_sms_patterns.py:
+#   - one regex subset valid in both Python `re` and Dart `RegExp`
+#   - NO named groups, NO lookbehind, NO inline flags, NO possessive/atomic groups, NO \A \Z
+#   - `fields` maps each field name to a positional group number
+#   - `case_insensitive: true` is applied by each runtime as a flag
+#   - input normalisation before matching (both runtimes): collapse all whitespace runs to one space, trim
+#   - date_format tokens: DD, MM, YY, YYYY, MON (3-letter English month, any case)
+#
+# Formats are modelled on common Indian bank SMS; verify against real messages before relying on them.
+version: 1
+patterns:
+  - id: hdfc_upi_debit
+    bank: hdfc
+    kind: debit
+    sender_ids: [HDFCBK]
+    regex: '^Sent Rs\.? ?([0-9,]+(?:\.[0-9]{1,2})?) From HDFC Bank A/C \*([0-9]{4}) To (.+?) On ([0-9]{2}/[0-9]{2}/[0-9]{2}) Ref ([0-9]+)'
+    fields: {amount: 1, account_last4: 2, merchant: 3, date: 4, reference: 5}
+    date_format: DD/MM/YY
+  - id: hdfc_credit
+    bank: hdfc
+    kind: credit
+    sender_ids: [HDFCBK]
+    regex: '^Update! INR ([0-9,]+(?:\.[0-9]{1,2})?) deposited in HDFC Bank A/c XX([0-9]{4}) on ([0-9]{2}-[A-Za-z]{3}-[0-9]{2}) for (.+?)\. ?Avl bal'
+    fields: {amount: 1, account_last4: 2, date: 3, merchant: 4}
+    date_format: DD-MON-YY
+  - id: hdfc_mandate_debit
+    bank: hdfc
+    kind: emi
+    sender_ids: [HDFCBK]
+    regex: '^UPDATE: INR ([0-9,]+(?:\.[0-9]{1,2})?) debited from HDFC Bank XX([0-9]{4}) on ([0-9]{2}-[A-Za-z]{3}-[0-9]{2})\. Info: (.+?)\. ?Avl bal'
+    fields: {amount: 1, account_last4: 2, date: 3, merchant: 4}
+    date_format: DD-MON-YY
+  - id: icici_upi_debit
+    bank: icici
+    kind: debit
+    sender_ids: [ICICIB, ICICIT]
+    regex: '^ICICI Bank Acct XX([0-9]{3,4}) debited for Rs\.? ?([0-9,]+(?:\.[0-9]{1,2})?) on ([0-9]{2}-[A-Za-z]{3}-[0-9]{2}); (.+?) credited\. UPI:([0-9]+)'
+    fields: {account_last4: 1, amount: 2, date: 3, merchant: 4, reference: 5}
+    date_format: DD-MON-YY
+  - id: icici_upi_credit
+    bank: icici
+    kind: credit
+    sender_ids: [ICICIB, ICICIT]
+    regex: '^Dear Customer, Acct XX([0-9]{3,4}) is credited with Rs\.? ?([0-9,]+(?:\.[0-9]{1,2})?) on ([0-9]{2}-[A-Za-z]{3}-[0-9]{2}) from (.+?)\. UPI:([0-9]+)'
+    fields: {account_last4: 1, amount: 2, date: 3, merchant: 4, reference: 5}
+    date_format: DD-MON-YY
+  - id: sbi_upi_debit
+    bank: sbi
+    kind: debit
+    sender_ids: [SBIUPI, SBIINB, ATMSBI]
+    regex: '^Dear UPI user A/C X([0-9]{4}) debited by ([0-9,]+(?:\.[0-9]{1,2})?) on date ([0-9]{2}[A-Za-z]{3}[0-9]{2}) trf to (.+?) Refno ([0-9]+)'
+    fields: {account_last4: 1, amount: 2, date: 3, merchant: 4, reference: 5}
+    date_format: DDMONYY
+  - id: axis_card_spend
+    bank: axis
+    kind: card_spend
+    sender_ids: [AXISBK]
+    regex: '^Spent INR ([0-9,]+(?:\.[0-9]{1,2})?) Axis Bank Card no\. XX([0-9]{4}) ([0-9]{2}-[0-9]{2}-[0-9]{2}) [0-9:]+ IST (.+?) Avl Limit'
+    fields: {amount: 1, account_last4: 2, date: 3, merchant: 4}
+    date_format: DD-MM-YY
+  - id: kotak_upi_debit
+    bank: kotak
+    kind: debit
+    sender_ids: [KOTAKB]
+    regex: '^Sent Rs\.? ?([0-9,]+(?:\.[0-9]{1,2})?) from Kotak Bank AC X([0-9]{4}) to (.+?) on ([0-9]{2}-[0-9]{2}-[0-9]{2})\. ?UPI Ref ([0-9]+)'
+    fields: {amount: 1, account_last4: 2, merchant: 3, date: 4, reference: 5}
+    date_format: DD-MM-YY

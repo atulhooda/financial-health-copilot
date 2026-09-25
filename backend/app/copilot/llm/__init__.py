@@ -1,0 +1,41 @@
+"""LLM adapters (COPILOT.md §2). Config comes only from env; no model name lives in code."""
+from __future__ import annotations
+
+import os
+
+from app.copilot.llm.base import LLMClient, LLMError, LLMReply, LLMUnavailable, MaskingLLM, ToolCall
+
+__all__ = ["LLMClient", "LLMError", "LLMReply", "LLMUnavailable", "MaskingLLM", "ToolCall", "get_llm"]
+
+
+def get_llm(provider: str | None = None, model: str | None = None, base_url: str | None = None,
+            api_key: str | None = None) -> LLMClient:
+    """The configured adapter (NoneClient for LLM_PROVIDER=none). Arguments override the env (the eval runs several
+    candidates). Fails clearly on missing config."""
+    from app.core.config import get_settings
+
+    s = get_settings()
+    provider = (provider or s.llm_provider or "none").lower()
+    if provider == "none":
+        from app.copilot.llm.none import NoneClient
+
+        return NoneClient()
+    model = model or s.llm_model
+    if not model:
+        raise LLMUnavailable(f"LLM_MODEL is required when LLM_PROVIDER={provider}")
+    key = api_key or s.llm_api_key
+    timeout = s.llm_timeout_s
+    if provider == "anthropic":
+        from app.copilot.llm.anthropic import AnthropicClient
+
+        if not (key or os.environ.get("ANTHROPIC_API_KEY")):
+            raise LLMUnavailable("LLM_API_KEY (or ANTHROPIC_API_KEY) is required when LLM_PROVIDER=anthropic")
+        return AnthropicClient(model, key, base_url or s.llm_base_url, timeout, s.llm_effort)
+    if provider == "openai_compat":
+        from app.copilot.llm.openai_compat import OpenAICompatClient
+
+        base_url = base_url or s.llm_base_url
+        if not base_url or not key:
+            raise LLMUnavailable("LLM_BASE_URL and LLM_API_KEY are required when LLM_PROVIDER=openai_compat")
+        return OpenAICompatClient(model, key, base_url, timeout)
+    raise LLMUnavailable(f"unknown LLM_PROVIDER {provider!r} (anthropic | openai_compat | none)")

@@ -1,0 +1,172 @@
+# Hinglish templates (Hindi in Latin script). Slot rules as in en.yaml. No digits or number words outside slots.
+
+confidence:
+  full: "confidence: {label}; pichhle dinon mein se {conf.coverage} par band sahi raha, target {conf.target}"
+  short: "confidence: {label}"
+assumes: "Ye maan kar: {items}."
+assumptions:
+  savings_interest: "bachat par saalana {value} byaaj"
+  pay_in_full_after: "card clear hone ke baad aap har mahine poora bill bharenge"
+  unswept_spend_share: "bache hue paison ka aadha hissa waise bhi kharch ho jata hai"
+  lender_approval: "lender ka approval (fee lag sakti hai)"
+  emi_rate: "saalana {value} byaaj"
+  tenure: "{value} ka tenure"
+  card_rate: "card par har mahine {value} byaaj"
+
+intents:
+  afford_emi:
+    - label: FACT
+      text: "Aapki monthly income {income_monthly} hai, aur EMIs pehle se iska {emi_to_income} le rahi hain."
+    - label: PREDICTION
+      when: bounce.m1.probability
+      text: "Nayi EMI se pehle hi, {bounce.m1.due} ko {=bounce.m1.name} ki {bounce.m1.amount} ki payment bounce hone
+        ka chance {bounce.m1.probability} hai ({@confidence})."
+    - label: PREDICTION
+      when: sim.new_emi.score_delta
+      text: "Agar aap {sim.new_emi.tenure} ke liye {sim.new_emi.principal} udhaar lete hain, toh EMI {sim.new_emi.emi}
+        hogi: EMIs aapki income ka {sim.new_emi.eti_after} le lengi, aur saal bhar baad aapka score
+        {sim.new_emi.score_base} ki jagah {sim.new_emi.score_with} hoga ({@label:sim.new_emi})."
+    - label: PREDICTION
+      unless: sim.new_emi.score_delta
+      text: "Agar aap {sim.new_emi.tenure} ke liye {sim.new_emi.principal} udhaar lete hain, toh EMI {sim.new_emi.emi}
+        hogi, aur EMIs aapki income ka {sim.new_emi.eti_after} le lengi ({@label:sim.new_emi})."
+    - label: PREDICTION
+      when: sim.new_emi.bounce_after
+      text: "Agar aap ye EMI lete hain, toh EMI bounce ka sabse bada khatra {sim.new_emi.bounce_after} hoga
+        ({=sim.new_emi.top_bounce_name}), jabki abhi {sim.new_emi.bounce_before} hai ({@label:sim.new_emi})."
+    - label: PREDICTION
+      text: "Agar aap ise {sim.new_emi.alt_tenure} ke liye lete hain, toh EMI {sim.new_emi.alt_emi} hogi
+        ({@label:sim.new_emi})."
+    - label: RECOMMENDATION
+      when: =sim.new_emi.advice
+      text: "Salary ki date ke turant baad ki EMI date maangiye: pehli EMI {sim.new_emi.date.after_payday} ko ho toh
+        bounce ka khatra {sim.new_emi.date.after_payday.risk} hai, jabki {sim.new_emi.date.in_30_days} ko
+        {sim.new_emi.date.in_30_days.risk}."
+    - label: RECOMMENDATION
+      rec: top
+  where_money:
+    - label: FACT
+      text: "Pichhle mahine aapne {spend.total} kharch kiye. Sabse bade kharche: {=spend.1.category} {spend.1.amount},
+        {=spend.2.category} {spend.2.amount} aur {=spend.3.category} {spend.3.amount}."
+    - label: FACT
+      when: drift.above_usual
+      text: "{=drift.category} ka kharch aam mahine se {drift.above_usual} zyada chal raha hai: {drift.amount}, jabki
+        aam taur par {drift.usual}."
+    - label: FACT
+      when: merchant.2.amount
+      text: "Sabse zyada kharch {=merchant.1.name} ({merchant.1.amount}) aur {=merchant.2.name} ({merchant.2.amount})
+        par hua."
+    - label: RECOMMENDATION
+      rec: top
+  run_short:
+    - label: PREDICTION
+      when: =forecast.salaried
+      text: "{forecast.next_income} ki agli salary se pehle aapke salary account ka balance {floor} se neeche jaane ka
+        chance {forecast.dip} hai ({@confidence})."
+    - label: PREDICTION
+      unless: =forecast.salaried
+      text: "Agli income (lagbhag {forecast.next_income}) se pehle aapke main account ka balance {floor} se neeche
+        jaane ka chance {forecast.dip} hai ({@confidence})."
+    - label: PREDICTION
+      when: bounce.m1.probability
+      text: "{bounce.m1.due} ko {=bounce.m1.name} ki {bounce.m1.amount} ki payment bounce hone ka chance
+        {bounce.m1.probability} hai ({@label})."
+    - label: PREDICTION
+      when: forecast.earmark.amount
+      text: "Ismein naye loan ke {forecast.earmark.amount} shaamil nahi hain, ye maan kar ki wo apne kaam mein lagenge;
+        agar aap unhe rakhte hain, toh balance neeche jaane ka chance {forecast.earmark.dip_if_kept} hai ({@label})."
+    - label: RECOMMENDATION
+      rec: top
+  score_change:
+    - label: FACT
+      when: change.score_delta
+      text: "{change.from_date} se aapka score {change.score_from} se {change.score_to} hua; ab ye {=change.band_to}
+        hai."
+    - label: FACT
+      unless: change.score_delta
+      text: "Aapka score {change.score_to} par hi hai ({=change.band_to})."
+    - label: FACT
+      when: change.new_data
+      text: "Ismein se {change.new_data} points us data se aaye jo pehle dikhta nahi tha, aapke kisi kaam se nahi."
+    - label: FACT
+      when: =change.reasons
+      text: "Kya badla: {=change.reasons}."
+    - label: PREDICTION
+      when: change.bounce.to
+      text: "EMI bounce ka sabse bada khatra {change.bounce.from} se {change.bounce.to} hua ({@confidence})."
+    - label: RECOMMENDATION
+      rec: top
+  tradeoff:
+    - label: RECOMMENDATION
+      rec: target
+    - label: RECOMMENDATION
+      tradeoff: target
+  summary:
+    - label: FACT
+      text: "Aapka health score {score}/100 hai ({=band}); sabse badi kamzori {=top_drag} hai."
+    - label: FACT
+      when: revolving
+      text: "Aapke card par {revolving} ka bakaya chal raha hai, aur EMIs aapki income ka {emi_to_income} le rahi
+        hain."
+    - label: FACT
+      unless: revolving
+      text: "Aap apni income ka {savings_rate} bachate hain, aur EMIs iska {emi_to_income} le rahi hain."
+    - label: RECOMMENDATION
+      rec: top
+
+recs:
+  link_account: "Apne {=.institution} card ka statement link kijiye taaki hum uska bakaya dekh sakein: tab hum
+    {.known} mein se {.linked_after} accounts dekh payenge, abhi {.linked_before}."
+  pay_down_card: "Bachat se {.amount} lagakar card ka bakaya chukaiye, phir card autopay ko poore statement par set
+    kijiye, aur {.cushion} cushion ke taur par rakhiye. Saal bhar baad score: {.score_base} ki jagah {.score_with}."
+  pay_down_card.partial: "Bachat se {.amount} lagakar card ka bakaya ghataiye, aur {.cushion} cushion ke taur par
+    rakhiye. Saal bhar baad score: {.score_base} ki jagah {.score_with}."
+  redirect_sweep: "Apna {.amount} ka monthly transfer bachat ki jagah card mein bhejiye, jab tak card clear na ho:
+    saal bhar baad score {.score_base} ki jagah {.score_with} hoga."
+  auto_sweep: "Salary ke din {.amount} extra card mein bhejiye: saal bhar baad score {.score_base} ki jagah
+    {.score_with} hoga."
+  auto_sweep.savings: "Salary ke din {.amount} bachat mein daaliye: saal bhar baad score {.score_base} ki jagah
+    {.score_with} hoga."
+  pay_down_card.flat: "Bachat se {.amount} lagakar card ka bakaya chukaiye, phir card autopay ko poore statement par set
+    kijiye, aur {.cushion} cushion ke taur par rakhiye: saal bhar mein {.card_interest_saved} ka card-byaaj bachega."
+  redirect_sweep.flat: "Apna {.amount} ka monthly transfer bachat ki jagah card mein bhejiye, jab tak card clear na ho:
+    saal bhar mein {.card_interest_saved} ka card-byaaj bachega."
+  auto_sweep.flat: "Salary ke din {.amount} extra card mein bhejiye: saal bhar mein {.card_interest_saved} ka
+    card-byaaj bachega."
+  auto_sweep.savings.flat: "Salary ke din {.amount} bachat mein daaliye: saal bhar baad aapka emergency buffer
+    {.buffer_12m_base} ki jagah {.buffer_12m_with} ke kharch jitna hoga."
+  auto_sweep.savings.payout: "Har payout ka {.share} bachat mein daaliye (mahine mein lagbhag {.amount}): saal bhar
+    baad score {.score_base} ki jagah {.score_with} hoga."
+  auto_sweep.savings.payout.flat: "Har payout ka {.share} bachat mein daaliye (mahine mein lagbhag {.amount}): saal
+    bhar baad aapka emergency buffer {.buffer_12m_base} ki jagah {.buffer_12m_with} ke kharch jitna hoga."
+  auto_sweep.payout: "Har payout ka {.share} card mein bhejiye (mahine mein lagbhag {.amount}): saal bhar baad score
+    {.score_base} ki jagah {.score_with} hoga."
+  auto_sweep.payout.flat: "Har payout ka {.share} card mein bhejiye (mahine mein lagbhag {.amount}): saal bhar mein
+    {.card_interest_saved} ka card-byaaj bachega."
+  new_emi: "Agar aap {.tenure} ke liye {.principal} udhaar lete hain, toh EMI {.emi} hogi, aur EMIs aapki income ka
+    {.eti_after} le lengi ({@label:.})."
+  delay_purchase: "Agar aap abhi ki jagah agli salary ke baad kharidte hain, toh EMI bounce ka sabse bada khatra
+    {.bounce_before} ki jagah {.bounce_after} hoga ({@label:.})."
+  delay_purchase.fallback: "Agar aap abhi ki jagah agli salary ke baad kharidte hain, toh EMI bounce ka khatra lagbhag
+    waisa hi rahega ({@label:.})."
+  cancel_overlapping_subs: "{=.keep} rakhiye aur {=.cancel} band kijiye: isse har mahine {.amount} bachenge, saal bhar
+    mein {.annual}."
+  change_emi_tenure: "Agar aap {=.loan} loan ko {.extra_months} badhate hain, toh EMI {.old_emi} se ghatkar {.new_emi}
+    hogi, par {.extra_interest} zyada byaaj lagega ({@label:.})."
+
+tradeoffs:
+  link_account: "Ismein paison ka koi trade-off nahi: link karne se hum bas {.known} mein se {.linked_after} accounts
+    dekh payenge."
+  pay_down_card: "Trade-off: abhi bachat se {.amount} nikal jayenge, aur agar aap phir har bill ka lagbhag {.pay_share}
+    hi bharne lage, toh bakaya {.rebuild_months} mein phir {.rebuild_to} tak pahunch jayega, aur bachat bhi ja chuki
+    hogi."
+  pay_down_card.fallback: "Trade-off: abhi bachat se {.amount} nikal jayenge."
+  redirect_sweep: "Trade-off: har mahine ke {.amount} bachat mein nahi jayenge, isliye saal bhar mein
+    {.savings_interest_lost} ka bachat-byaaj chhootega, jabki {.card_interest_saved} ka card-byaaj bachega."
+  redirect_sweep.fallback: "Trade-off: card clear hone tak har mahine ke {.amount} bachat mein nahi jayenge."
+  auto_sweep: "Trade-off: salary ke beech haath mein kam paisa rahega; EMI bounce ka sabse bada khatra
+    {.bounce_before} se {.bounce_after} hoga."
+  auto_sweep.fallback: "Trade-off: har salary ke baad account mein {.amount} kam rahenge."
+  cancel_overlapping_subs: "Trade-off bas itna ki wo apps nahi rahenge; bachat har mahine {.amount} ki hai."
+  change_emi_tenure: "Agar aap ise badhate hain, toh {.extra_months} zyada samay tak karz rahega aur {.extra_interest}
+    zyada byaaj lagega, badle mein EMI {.old_emi} ki jagah {.new_emi} hogi ({@label:.})."

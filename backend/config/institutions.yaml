@@ -1,0 +1,13 @@
+# Institution codes and the aliases that identify them in AA fipName, SMS sender ids and narrations.
+# min_balance_paise: an instantaneous minimum-balance requirement, used as the safety floor (SPEC D17).
+# Leave null unless the product has a hard floor; a monthly *average* balance (MAB) is not a floor.
+institutions:
+  hdfc:  {name: HDFC Bank,  aliases: [HDFC BANK, HDFC, HDFCBANK, HDFC-FIP, HDFCBK], min_balance_paise: null}
+  icici: {name: ICICI Bank, aliases: [ICICI BANK, ICICI, ICICIB, ICICI-FIP], min_balance_paise: null}
+  sbi:   {name: State Bank of India, aliases: [STATE BANK OF INDIA, SBI, SBIINB, SBI-FIP, SBIPSG], min_balance_paise: null}
+  axis:  {name: Axis Bank,  aliases: [AXIS BANK, AXIS, AXISBK, AXIS-FIP], min_balance_paise: null}
+  kotak: {name: Kotak Mahindra Bank, aliases: [KOTAK MAHINDRA BANK, KOTAK, KOTAKB, KOTAK-FIP], min_balance_paise: null}
+  bajaj: {name: Bajaj Finance, aliases: [BAJAJ FINANCE, BAJAJ FIN, BAJAJFIN, BAJAJ-FIP], min_balance_paise: null}
+  tatacap: {name: Tata Capital, aliases: [TATA CAPITAL, TATACAP, TATA CAPITAL FINANCIAL], min_balance_paise: null}
+  idfc:  {name: IDFC First Bank, aliases: [IDFC FIRST BANK, IDFC FIRST, IDFCFB, IDFC], min_balance_paise: null}
+default_floor_paise: 500000   # ₹5,000 (SPEC D17)

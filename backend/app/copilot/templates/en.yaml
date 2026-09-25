@@ -1,0 +1,171 @@
+# English templates (COPILOT.md §9). Slots: {key} a registry number (its display string, cited in refs),
+# {.key} the same under the statement's recommendation prefix, {=key} a text slot, {@confidence} / {@label} the
+# forecast's confidence. A statement is skipped when a slot is missing; `when` / `unless` test a slot. Every
+# RECOMMENDATION gets its simulation's assumptions appended. No digits or number words outside slots.
+
+confidence:
+  full: "{label} confidence: the band held on {conf.coverage} of past days, target {conf.target}"
+  short: "{label} confidence"
+assumes: "Assumes {items}."
+assumptions:
+  savings_interest: "savings earn {value} a year"
+  pay_in_full_after: "you pay the card in full once it's clear"
+  unswept_spend_share: "half of any freed-up cash gets spent anyway"
+  lender_approval: "the lender's approval (a fee may apply)"
+  emi_rate: "{value} interest a year"
+  tenure: "a tenure of {value}"
+  card_rate: "card interest of {value} a month"
+
+intents:
+  afford_emi:
+    - label: FACT
+      text: "Your monthly income is {income_monthly}, and EMIs already take {emi_to_income} of it."
+    - label: PREDICTION
+      when: bounce.m1.probability
+      text: "Even before a new EMI, your {=bounce.m1.name} payment of {bounce.m1.amount} due {bounce.m1.due} has a
+        {bounce.m1.probability} chance of bouncing ({@confidence})."
+    - label: PREDICTION
+      when: sim.new_emi.score_delta
+      text: "If you borrow {sim.new_emi.principal} over {sim.new_emi.tenure}, the EMI would be {sim.new_emi.emi}: EMIs
+        would take {sim.new_emi.eti_after} of your income, and your score a year from now would be
+        {sim.new_emi.score_with} instead of {sim.new_emi.score_base} ({@label:sim.new_emi})."
+    - label: PREDICTION
+      unless: sim.new_emi.score_delta
+      text: "If you borrow {sim.new_emi.principal} over {sim.new_emi.tenure}, the EMI would be {sim.new_emi.emi}, and
+        EMIs would take {sim.new_emi.eti_after} of your income ({@label:sim.new_emi})."
+    - label: PREDICTION
+      when: sim.new_emi.bounce_after
+      text: "If you take it, the biggest EMI bounce risk would be {sim.new_emi.bounce_after}
+        ({=sim.new_emi.top_bounce_name}), against {sim.new_emi.bounce_before} now ({@label:sim.new_emi})."
+    - label: PREDICTION
+      text: "If you take it over {sim.new_emi.alt_tenure} instead, the EMI would be {sim.new_emi.alt_emi}
+        ({@label:sim.new_emi})."
+    - label: RECOMMENDATION
+      when: =sim.new_emi.advice
+      text: "Ask for an EMI date right after your salary date: the new EMI's bounce risk would be
+        {sim.new_emi.date.after_payday.risk} with a first EMI on {sim.new_emi.date.after_payday}, against
+        {sim.new_emi.date.in_30_days.risk} on {sim.new_emi.date.in_30_days}."
+    - label: RECOMMENDATION
+      rec: top
+  where_money:
+    - label: FACT
+      text: "In the past month you spent {spend.total}. The biggest items: {=spend.1.category} {spend.1.amount},
+        {=spend.2.category} {spend.2.amount} and {=spend.3.category} {spend.3.amount}."
+    - label: FACT
+      when: drift.above_usual
+      text: "{=drift.category} is running {drift.above_usual} above your usual month: {drift.amount} against
+        {drift.usual}."
+    - label: FACT
+      when: merchant.2.amount
+      text: "Your top merchants were {=merchant.1.name} ({merchant.1.amount}) and {=merchant.2.name}
+        ({merchant.2.amount})."
+    - label: RECOMMENDATION
+      rec: top
+  run_short:
+    - label: PREDICTION
+      when: =forecast.salaried
+      text: "The chance your salary account dips below {floor} before your next salary on {forecast.next_income} is
+        {forecast.dip} ({@confidence})."
+    - label: PREDICTION
+      unless: =forecast.salaried
+      text: "The chance your main account dips below {floor} before your next income (around
+        {forecast.next_income}) is {forecast.dip} ({@confidence})."
+    - label: PREDICTION
+      when: bounce.m1.probability
+      text: "Your {=bounce.m1.name} payment of {bounce.m1.amount} due {bounce.m1.due} has a {bounce.m1.probability}
+        chance of bouncing ({@label})."
+    - label: PREDICTION
+      when: forecast.earmark.amount
+      text: "This leaves out the {forecast.earmark.amount} of new loan money, assuming it goes to its purpose; if you
+        keep it, the chance of a dip is {forecast.earmark.dip_if_kept} ({@label})."
+    - label: RECOMMENDATION
+      rec: top
+  score_change:
+    - label: FACT
+      when: change.score_delta
+      text: "Your score moved from {change.score_from} to {change.score_to} since {change.from_date}; it is now
+        {=change.band_to}."
+    - label: FACT
+      unless: change.score_delta
+      text: "Your score is unchanged at {change.score_to} ({=change.band_to})."
+    - label: FACT
+      when: change.new_data
+      text: "{change.new_data} points of that came from data we couldn't see before, not from anything you did."
+    - label: FACT
+      when: =change.reasons
+      text: "What changed: {=change.reasons}."
+    - label: PREDICTION
+      when: change.bounce.to
+      text: "Your largest EMI bounce risk moved from {change.bounce.from} to {change.bounce.to} ({@confidence})."
+    - label: RECOMMENDATION
+      rec: top
+  tradeoff:
+    - label: RECOMMENDATION
+      rec: target
+    - label: RECOMMENDATION
+      tradeoff: target
+  summary:
+    - label: FACT
+      text: "Your health score is {score}/100 ({=band}); the biggest drag is {=top_drag}."
+    - label: FACT
+      when: revolving
+      text: "Your card is carrying {revolving} unpaid, and EMIs take {emi_to_income} of your income."
+    - label: FACT
+      unless: revolving
+      text: "You save {savings_rate} of your income, and EMIs take {emi_to_income} of it."
+    - label: RECOMMENDATION
+      rec: top
+
+recs:
+  link_account: "Link your {=.institution} card statement so we can see its balance: we'd see {.linked_after} of
+    {.known} accounts instead of {.linked_before}."
+  pay_down_card: "Use {.amount} of savings to clear your card, then set card autopay to the full statement amount,
+    keeping {.cushion} as a cushion. Your score a year from now: {.score_with} instead of {.score_base}."
+  pay_down_card.partial: "Use {.amount} of savings to pay down your card, keeping {.cushion} as a cushion. Your score a
+    year from now: {.score_with} instead of {.score_base}."
+  redirect_sweep: "Send your {.amount} monthly transfer to the card instead of savings until it's clear: your score a
+    year from now would be {.score_with} instead of {.score_base}."
+  auto_sweep: "On payday, send {.amount} extra to the card: your score a year from now would be {.score_with} instead
+    of {.score_base}."
+  auto_sweep.savings: "On payday, move {.amount} to savings: your score a year from now would be {.score_with} instead
+    of {.score_base}."
+  pay_down_card.flat: "Use {.amount} of savings to clear your card, then set card autopay to the full statement amount,
+    keeping {.cushion} as a cushion: that saves {.card_interest_saved} of card interest over a year."
+  redirect_sweep.flat: "Send your {.amount} monthly transfer to the card instead of savings until it's clear: that
+    saves {.card_interest_saved} of card interest over a year."
+  auto_sweep.flat: "On payday, send {.amount} extra to the card: that saves {.card_interest_saved} of card interest
+    over a year."
+  auto_sweep.savings.flat: "On payday, move {.amount} to savings: a year from now your emergency buffer would be
+    {.buffer_12m_with} instead of {.buffer_12m_base}."
+  auto_sweep.savings.payout: "Move {.share} of each payout to savings (about {.amount} a month): your score a year
+    from now would be {.score_with} instead of {.score_base}."
+  auto_sweep.savings.payout.flat: "Move {.share} of each payout to savings (about {.amount} a month): a year from now
+    your emergency buffer would be {.buffer_12m_with} instead of {.buffer_12m_base}."
+  auto_sweep.payout: "Send {.share} of each payout to the card (about {.amount} a month): your score a year from now
+    would be {.score_with} instead of {.score_base}."
+  auto_sweep.payout.flat: "Send {.share} of each payout to the card (about {.amount} a month): that saves
+    {.card_interest_saved} of card interest over a year."
+  new_emi: "If you borrow {.principal} over {.tenure}, the EMI would be {.emi}, and EMIs would take {.eti_after} of your
+    income ({@label:.})."
+  delay_purchase: "If you buy after your next payday instead of now, your largest EMI bounce risk would be
+    {.bounce_after} instead of {.bounce_before} ({@label:.})."
+  delay_purchase.fallback: "If you buy after your next payday instead of now, your EMI bounce risk stays about the
+    same ({@label:.})."
+  cancel_overlapping_subs: "Keep {=.keep} and cancel {=.cancel}: that saves {.amount} a month, {.annual} over a year."
+  change_emi_tenure: "If you extend your {=.loan} loan by {.extra_months}, the EMI would drop from {.old_emi} to
+    {.new_emi}, but you'd pay {.extra_interest} more in interest ({@label:.})."
+
+tradeoffs:
+  link_account: "There is no money trade-off: linking only lets us see {.linked_after} of {.known} accounts."
+  pay_down_card: "The trade-off: {.amount} leaves your savings now, and if you go back to paying about {.pay_share} of
+    each bill, the balance rebuilds to {.rebuild_to} within {.rebuild_months}, with the savings gone."
+  pay_down_card.fallback: "The trade-off: {.amount} leaves your savings now."
+  redirect_sweep: "The trade-off: that {.amount} a month stops going to savings, so you give up
+    {.savings_interest_lost} of savings interest over a year while saving {.card_interest_saved} of card interest."
+  redirect_sweep.fallback: "The trade-off: that {.amount} a month stops going to savings until the card is clear."
+  auto_sweep: "The trade-off: less cash between paydays; your largest EMI bounce risk goes from {.bounce_before} to
+    {.bounce_after}."
+  auto_sweep.fallback: "The trade-off: {.amount} less in your account after each payday."
+  cancel_overlapping_subs: "The only trade-off is losing those apps; the saving is {.amount} a month."
+  change_emi_tenure: "If you extend it, you'd owe for {.extra_months} longer and pay {.extra_interest} more interest,
+    for an EMI of {.new_emi} instead of {.old_emi} ({@label:.})."

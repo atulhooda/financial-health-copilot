@@ -1,0 +1,76 @@
+# essential: counts toward essential spend (buffer denominator).  spend: counts as consumption spend.
+# discretionary: counts toward discretionary spend (stability pillar); defaults to spend and not essential.
+# SPEC §5. transfer_unseen / card_bill_unlinked ARE spend (D3/D4). uncategorised is ESSENTIAL (D21): an
+# unknown outflow is assumed unavoidable, so the emergency buffer is never overstated.
+
+# ML fallback: below this confidence a transaction is "uncategorised" (D21). Chosen from the
+# unseen-merchant-type holdout in docs/CATEGORISER.md.
+ml_min_confidence: 0.9
+
+categories:
+  income_salary:      {essential: false, spend: false, income: true}
+  income_gig:         {essential: false, spend: false, income: true}
+  income_other:       {essential: false, spend: false, income: true}
+  refund:             {essential: false, spend: false}
+  loan_disbursal:     {essential: false, spend: false}
+  rent:               {essential: true,  spend: true}
+  emi:                {essential: true,  spend: true, debt_service: true}
+  sip_investment:     {essential: false, spend: false, saving: true}
+  groceries:          {essential: true,  spend: true}
+  utilities:          {essential: true,  spend: true}
+  telecom:            {essential: true,  spend: true}
+  education:          {essential: true,  spend: true}
+  health:             {essential: true,  spend: true}
+  insurance:          {essential: true,  spend: true}
+  fuel:               {essential: true,  spend: true}
+  transport:          {essential: false, spend: true}
+  food_delivery:      {essential: false, spend: true}
+  dining:             {essential: false, spend: true}
+  shopping:           {essential: false, spend: true}
+  ott_subscription:   {essential: false, spend: true}
+  entertainment:      {essential: false, spend: true}
+  travel:             {essential: false, spend: true}
+  cash_withdrawal:    {essential: false, spend: true}
+  fees_charges:       {essential: false, spend: true, discretionary: false}
+  card_interest:      {essential: false, spend: true, discretionary: false}
+  transfer_self:      {essential: false, spend: false}
+  transfer_person:    {essential: false, spend: true}
+  transfer_unseen:    {essential: false, spend: true}
+  transfer_in_unseen: {essential: false, spend: false}
+  card_bill_unlinked: {essential: false, spend: true}
+  loan_repayment_in:  {essential: false, spend: false}
+  loan_disbursal_out: {essential: false, spend: false}
+  other:              {essential: false, spend: true}
+  uncategorised:      {essential: true,  spend: true, discretionary: false}
+
+# Narration keyword rules, checked in order before the merchant map. `direction` optional.
+# Plain substrings on the upper-cased narration (no regex) so they stay auditable.
+keyword_rules:
+  - {any: [SALARY, SAL CR, SALARY CREDIT], direction: credit, category: income_salary}
+  - {any: [PAYOUT, PARTNER SETTLEMENT, CAPTAIN EARNINGS], direction: credit, category: income_gig}
+  - {any: [LOAN DISB, DISBURSEMENT CR], direction: credit, category: loan_disbursal}
+  - {any: [CREDIT INTEREST, INT.PD, INTEREST CREDIT, SB INT], direction: credit, category: income_other}
+  - {any: [GST ON, IGST, CGST, SGST, LATE PAYMENT FEE, LATE FEE, ANNUAL FEE, OVERLIMIT FEE], direction: debit, category: fees_charges}
+  - {any: [FINANCE CHARGES, INTEREST CHARGED], direction: debit, category: card_interest}
+  - {any: [RTN CHRG, RETURN CHARGES, BOUNCE, ECS RETURN, NACH RTN], direction: debit, category: fees_charges, bounce: true}
+  - {any: [ATW-, NWD-, ATM WDL, CASH WITHDRAWAL], direction: debit, category: cash_withdrawal}
+  - {any: [REFUND, REVERSAL], direction: credit, category: refund}
+  - {any: [CASHBACK], direction: credit, category: refund}
+
+# P2P remark keywords (after a person is detected)
+p2p_rules:
+  - {any: [RENT], direction: debit, category: rent}
+  - {any: [SCHOOL FEE, TUITION], direction: debit, category: education}
+  - {any: [MAID, HOUSE HELP, COOK], direction: debit, category: utilities}
+
+# NACH/ACH mandate debits to an entity not in the merchant map.
+mandate_rules:
+  - {any: [FINANCE, CAPITAL, LOAN, FINSERV, HOUSING, CREDIT], category: emi}
+  - {any: [MF, MUTUAL, AMC, SIP, BSE, NSE CLEARING], category: sip_investment}
+  - {any: [INSURANCE, LIFE, ASSURANCE, LIC], category: insurance}
+
+# Narration signatures (upper-case substrings)
+signatures:
+  card_bill: [CREDIT CARD, CC PAYMENT, CARD PAYMENT, CREDITCARD, CC BILL]
+  card_payment_received: [PAYMENT RECEIVED, PAYMENT - THANK YOU, PYMT RECD]
+  self_transfer: [SELF TRANSFER, "/SELF/", "-SELF-", OWN A/C, OWN ACCOUNT, TRF TO OWN, SELF]

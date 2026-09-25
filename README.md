@@ -1,1 +1,27 @@
-# financial-health-copilot
+# Hisaab: AI Financial Health Copilot (backend)
+
+Hackathon prototype. Read [CLAUDE.md](CLAUDE.md) for the rules and [docs/SPEC.md](docs/SPEC.md) for the design.
+
+```bash
+brew install libomp            # macOS: LightGBM runtime
+make up                        # Postgres (host port 55432) + Redis, migrations
+make seed                      # trains the categoriser if needed, loads personas A (T0), B, C
+make demo                      # persona A replay T0 -> +3
+make test
+
+cd backend
+uv run hisaab ask --user demo-a "Kya main ₹60,000 ka phone 12 months ki EMI pe le sakta hoon?"   # --debug for the trace
+uv run hisaab eval-copilot --candidates   # 30-question eval per candidate model -> docs/COPILOT_EVAL.md
+```
+
+Keys: copy `backend/.env.example` to `backend/.env` (gitignored) and fill it in; never commit keys or paste them into
+chat or logs. `make hooks` installs a pre-push secret scan; `make secret-scan` runs it by hand.
+
+API: `make api` serves v1 on :8000 (`/docs` for the OpenAPI UI; dev-only auth, send `X-User-Id: demo-a`). The contract
+is [docs/API.md](docs/API.md) plus the frozen [docs/openapi.json](docs/openapi.json). `make demo-offline` rehearses the
+demo with no Redis and no LLM.
+
+The copilot answers from templates when `LLM_PROVIDER=none` (the default). For a model, set `LLM_PROVIDER=anthropic`
+(or `openai_compat` with `LLM_BASE_URL`), `LLM_MODEL` and `LLM_API_KEY`; see [docs/COPILOT.md](docs/COPILOT.md).
+
+Layout: `backend/` (FastAPI brain), `mobile/` (Flutter, later), `shared/` (SMS patterns used on device and in tests), `docs/`.

@@ -1,0 +1,13 @@
+# HDFC Bank savings account statement (NetBanking "Delimited" export). SPEC §4: bank formats are config.
+institution: hdfc
+account_kind: savings
+delimiter: ","
+skip_rows: 0
+date_format: "%d/%m/%y"
+columns:
+  date: Date
+  narration: Narration
+  reference: Chq./Ref.No.
+  debit: Withdrawal Amt.
+  credit: Deposit Amt.
+  balance: Closing Balance

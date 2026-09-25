@@ -1,0 +1,12 @@
+institution: icici
+account_kind: savings
+delimiter: ","
+skip_rows: 0
+date_format: "%d-%m-%Y"
+columns:
+  date: Transaction Date
+  narration: Transaction Remarks
+  reference: Cheque Number
+  debit: Withdrawal Amount (INR )
+  credit: Deposit Amount (INR )
+  balance: Balance (INR )

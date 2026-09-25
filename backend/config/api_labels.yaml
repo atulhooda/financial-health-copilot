@@ -1,0 +1,58 @@
+# Titles of the labelled items the API returns (docs/API.md), in English, Hindi and Hinglish. No numbers here: an
+# item's number is its `value`, and its `text` is "{title}: {display}" (plus the confidence for a PREDICTION).
+
+text:
+  fact: {en: "{title}: {display}", hi: "{title}: {display}", hinglish: "{title}: {display}"}
+  prediction: {en: "{title}: {display} ({confidence})", hi: "{title}: {display} ({confidence})",
+               hinglish: "{title}: {display} ({confidence})"}
+
+facts:
+  score: {en: Health score, hi: हेल्थ स्कोर, hinglish: Health score}
+  income_monthly: {en: Monthly income, hi: मासिक आय, hinglish: Monthly income}
+  spend_monthly: {en: Monthly spending, hi: मासिक ख़र्च, hinglish: Monthly kharch}
+  savings_rate: {en: Share of income saved, hi: आय का बचाया गया हिस्सा, hinglish: Income ka bachaya hissa}
+  buffer_months: {en: Emergency buffer, hi: आपातकालीन बचत, hinglish: Emergency buffer}
+  emi_monthly: {en: EMIs a month, hi: हर महीने की EMI, hinglish: Har mahine ki EMI}
+  emi_to_income: {en: EMIs as a share of income, hi: आय में EMI का हिस्सा, hinglish: Income mein EMI ka hissa}
+  debt_to_income: {en: Debt as a share of a year's income, hi: साल भर की आय में कर्ज़ का हिस्सा,
+                   hinglish: Saal bhar ki income mein karz ka hissa}
+  credit_utilisation: {en: Card used vs limit, hi: कार्ड लिमिट का इस्तेमाल, hinglish: Card limit ka istemaal}
+  revolving: {en: Card balance carried over, hi: कार्ड का बकाया, hinglish: Card ka bakaya}
+  liquid: {en: Money in your bank accounts, hi: बैंक खातों में पैसा, hinglish: Bank accounts mein paisa}
+  floor: {en: Safety floor, hi: न्यूनतम सुरक्षित बैलेंस, hinglish: Safety floor}
+  forecast.horizon: {en: Forecast horizon, hi: अनुमान की अवधि, hinglish: Forecast ki avadhi}
+  forecast.next_income: {en: Next salary date, hi: अगली सैलरी की तारीख़, hinglish: Agli salary ki date}
+  spend.total: {en: Spent in the past month, hi: पिछले महीने का ख़र्च, hinglish: Pichhle mahine ka kharch}
+  pillar: {en: "Points from {pillar}", hi: "{pillar} से अंक", hinglish: "{pillar} se points"}
+  score_before: {en: Health score before, hi: पहले का हेल्थ स्कोर, hinglish: Pehle ka health score}
+  score_now: {en: Health score now, hi: अभी का हेल्थ स्कोर, hinglish: Abhi ka health score}
+  spend: {en: "{category}: past month", hi: "{category}: पिछला महीना", hinglish: "{category}: pichhla mahina"}
+  drift: {en: "{category}: above your usual month", hi: "{category}: आम महीने से ज़्यादा",
+          hinglish: "{category}: aam mahine se zyada"}
+
+predictions:
+  forecast.dip: {en: Chance of dipping below your safety floor before your next income,
+                 hi: अगली आमदनी से पहले बैलेंस के सुरक्षित सीमा से नीचे जाने की संभावना,
+                 hinglish: Agli income se pehle balance safety floor se neeche jaane ka chance}
+  forecast.dip_date: {en: Most likely date of the first dip, hi: पहली गिरावट की सबसे संभावित तारीख़,
+                      hinglish: Pehli dip ki sabse sambhavit date}
+  forecast.low: {en: Lowest balance in the coming month (middle case), hi: अगले महीने में सबसे कम बैलेंस (मध्य अनुमान),
+                 hinglish: Agle mahine mein sabse kam balance (middle case)}
+  forecast.pre.p50: {en: Balance the day before your next income (middle case),
+                     hi: अगली आमदनी से ठीक पहले बैलेंस (मध्य अनुमान),
+                     hinglish: Agli income se theek pehle balance (middle case)}
+  bounce: {en: "Chance the {name} payment bounces", hi: "{name} भुगतान के बाउंस होने की संभावना",
+           hinglish: "{name} payment bounce hone ka chance"}
+
+recommendations:
+  link_account: {en: Link your card statement, hi: कार्ड स्टेटमेंट लिंक करें, hinglish: Card statement link kijiye}
+  pay_down_card: {en: Clear your card from savings, hi: बचत से कार्ड चुकाएँ, hinglish: Bachat se card chukaiye}
+  redirect_sweep: {en: Send your savings transfer to the card, hi: बचत का ट्रांसफ़र कार्ड में भेजें,
+                   hinglish: Bachat ka transfer card mein bhejiye}
+  auto_sweep: {en: Move money on payday, hi: सैलरी के दिन पैसा अलग करें, hinglish: Salary ke din paisa alag kijiye}
+  cancel_overlapping_subs: {en: Cancel overlapping subscriptions, hi: एक जैसे सब्सक्रिप्शन बंद करें,
+                            hinglish: Ek jaise subscriptions band kijiye}
+  change_emi_tenure: {en: "Explore: a longer loan tenure", hi: "विचार के लिए: लोन की लंबी अवधि",
+                      hinglish: "Sochne ke liye: loan ki lambi avadhi"}
+  new_emi: {en: "What if: a new EMI", hi: "अगर: एक नई EMI", hinglish: "Agar: ek nayi EMI"}
+  delay_purchase: {en: "What if: buy after payday", hi: "अगर: सैलरी के बाद ख़रीदें", hinglish: "Agar: salary ke baad kharidein"}

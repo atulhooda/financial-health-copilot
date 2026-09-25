@@ -1,0 +1,64 @@
+# Guards run before any LLM call (COPILOT.md §8, SPEC D9). Phrases match case-insensitively on whole words after
+# normalisation. Tier 1 wins over tier 2; distress wins over scope. Each list has positive and negative tests.
+
+distress_tier1:  # explicit self-harm intent: all advice stops, the LLM is never called
+  en: [suicide, suicidal, kill myself, killing myself, end my life, ending my life, take my own life, end it all,
+       don't want to live, do not want to live, dont want to live, want to die, better off dead, no reason to live,
+       hurt myself, harm myself, self harm, self-harm]
+  hinglish: [khudkushi, khudkhushi, khud kushi, aatmahatya, atmahatya, aatmhatya, marna chahta, marna chahti,
+             mar jana chahta, mar jana chahti, jeena nahi chahta, jeena nahi chahti, jina nahi chahta,
+             jina nahi chahti, zindagi khatam karna, jaan de dunga, jaan de dungi, jaan de doon, khud ko khatam,
+             khud ko maar]
+  hi: [आत्महत्या, ख़ुदकुशी, खुदकुशी, मरना चाहता, मरना चाहती, मर जाना चाहता, मर जाना चाहती, जीना नहीं चाहता,
+       जीना नहीं चाहती, ज़िंदगी खत्म करना, जिंदगी खत्म करना, जान दे दूँगा, जान दे दूंगा, जान दे दूँगी, खुद को खत्म,
+       ख़ुद को ख़त्म, खुद को मार]
+
+distress_tier2:  # money-stress idioms: one check-in line with the helpline, then the answer as usual
+  en: [killing me, drowning in debt, can't cope, cannot cope, cant cope, can't sleep, cannot sleep, losing my mind,
+       end of my rope, hopeless, so stressed, breaking down, crushing me]
+  hinglish: [jaan le li, jaan le lega, jaan le legi, jaan nikal, mar gaya, mar gayi, mar jaunga, mar jaungi,
+             maar dala, maar dalega, dimaag kharab, dimag kharab, pareshan, neend nahi, barbaad, tabaah,
+             phas gaya, fas gaya, phans gaya, doob gaya, dub gaya]
+  hi: [जान ले ली, जान ले लेगी, जान निकल, मर गया, मर गई, मर जाऊँगा, मर जाऊंगा, मार डाला, परेशान, दिमाग़ ख़राब,
+       दिमाग खराब, नींद नहीं, बर्बाद, तबाह, फँस गया, फंस गया, डूब गया]
+
+scope:  # securities, crypto, tips, promised returns: not a SEBI-registered investment adviser
+  en: [which stock, which stocks, what stock, best stock, best stocks, stock tip, stock tips, share tip, share tips,
+       multibagger, crypto, cryptocurrency, bitcoin, btc, ethereum, dogecoin, nft, f&o, futures and options,
+       options trading, intraday, ipo, best mutual fund, which mutual fund, which fund, best fund, best sip fund,
+       guaranteed return, guaranteed returns, double my money, double money, get rich quick, penny stock, forex,
+       trading tip, trading tips]
+  hinglish: [kaunsa share, konsa share, kaun sa share, kaunsa stock, konsa stock, kaun sa stock, share tip,
+             paisa double, paise double, double ho jaye, double ho jayega, double hoga, pakka return, guaranteed return,
+             kaunsa fund, konsa fund, kaun sa fund, kaunsa mutual fund, konsa mutual fund]
+  hi: [कौनसा शेयर, कौन सा शेयर, शेयर टिप, पैसा डबल, पैसे डबल, डबल हो जाए, बिटकॉइन, क्रिप्टो, गारंटीड रिटर्न,
+       पक्का रिटर्न, कौन सा फंड, कौनसा फंड, कौन सा म्यूचुअल फंड, इंट्राडे, आईपीओ, मल्टीबैगर]
+
+messages:
+  distress:
+    en: "I'm really sorry you're feeling this way. You don't have to face this alone. Please talk to someone now:
+      {helpline} is free, 24x7 and multilingual. Call {numbers}. If you are in immediate danger, call {emergency}.
+      The money questions can wait."
+    hinglish: "Mujhe bahut afsos hai ki aap aisa mehsoos kar rahe hain. Aap akele nahi hain. Abhi kisi se baat
+      kijiye: {helpline} free hai, 24x7 aur kai bhashaon mein. {numbers} par call karein. Agar aap turant khatre mein
+      hain, toh {emergency} par call karein. Paison ki baat baad mein ho sakti hai."
+    hi: "मुझे बहुत दुख है कि आप ऐसा महसूस कर रहे हैं। आप अकेले नहीं हैं। अभी किसी से बात कीजिए: {helpline} मुफ़्त है,
+      24x7 और कई भाषाओं में। {numbers} पर कॉल करें। अगर आप तुरंत ख़तरे में हैं, तो {emergency} पर कॉल करें। पैसों की बात
+      बाद में हो सकती है।"
+  checkin:
+    en: "Money stress like this is heavy. If it ever feels like too much, {helpline} is free and 24x7: {numbers}."
+    hinglish: "Paison ka aisa stress bhaari hota hai. Agar kabhi bahut zyada lage, toh {helpline} se baat karein
+      (free, 24x7): {numbers}."
+    hi: "पैसों का ऐसा तनाव भारी होता है। अगर कभी बहुत ज़्यादा लगे, तो {helpline} से बात करें (मुफ़्त, 24x7): {numbers}।"
+  scope:
+    en: "I'm not a SEBI-registered investment adviser, so I can't pick stocks, funds or crypto, or promise returns.
+      I can help with your own money instead:"
+    hinglish: "Main SEBI-registered investment adviser nahi hoon, isliye stocks, funds ya crypto nahi chun sakta, na
+      return ka vaada kar sakta hoon. Aapke apne paison mein madad kar sakta hoon:"
+    hi: "मैं SEBI-रजिस्टर्ड निवेश सलाहकार नहीं हूँ, इसलिए शेयर, फंड या क्रिप्टो नहीं चुन सकता, न रिटर्न का वादा कर सकता
+      हूँ। आपके अपने पैसों में मदद कर सकता हूँ:"
+  scope_suggestions:
+    en: ["Can I afford a new EMI?", "Where is my money going?", "Will I run short before payday?"]
+    hinglish: ["Kya main nayi EMI le sakta hoon?", "Mera paisa kahan ja raha hai?", "Salary se pehle paisa kam padega?"]
+    hi: ["क्या मैं नई EMI ले सकता हूँ?", "मेरा पैसा कहाँ जा रहा है?", "क्या सैलरी से पहले पैसे कम पड़ेंगे?"]
+  numbers_joiner: {en: " or ", hinglish: " ya ", hi: " या "}

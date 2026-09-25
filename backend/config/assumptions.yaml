@@ -1,0 +1,9 @@
+# Every assumed rate or behavioural parameter the engines use. Always returned to the user as an explicit assumption.
+card_apr_bps: 4200                 # ~3.5%/month, typical Indian card finance charge, when the statement gives none
+consumer_emi_rate_bps: 1500        # what-if EMI rate when the user doesn't give one
+loan_rate_bps_fallback: 1400       # when a loan account has no rate
+gst_on_finance_charges_bps: 1800
+unswept_spend_share: 0.5           # SPEC D7
+sweep_step_paise: 50000            # ₹500 steps
+sweep_max_dip_increase_pp: 2       # SPEC D7
+savings_interest_bps: 300          # D30: savings account interest, an ASSUMPTION (card interest comes from the statement)

@@ -1,0 +1,12 @@
+# Axis Bank credit card statement export: single amount column with Dr/Cr marker.
+institution: axis
+account_kind: credit_card
+delimiter: ","
+skip_rows: 0
+date_format: "%d/%m/%Y"
+columns:
+  date: Date
+  narration: Transaction Details
+  amount: Amount (INR)
+  dr_cr: Debit/Credit
+dr_cr_values: {debit: Dr, credit: Cr}

@@ -1,0 +1,30 @@
+# Each positive fixture must parse to exactly `expect`; each negative must not match any pattern.
+positive:
+  - sender: VM-HDFCBK
+    sms: "Sent Rs.450.00\nFrom HDFC Bank A/C *4321\nTo SWIGGY\nOn 12/09/26\nRef 412345678901\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808"
+    expect: {pattern_id: hdfc_upi_debit, amount_paise: 45000, account_last4: "4321", merchant_raw: SWIGGY, txn_date: 2026-09-12, direction: debit, reference: "412345678901"}
+  - sender: AD-HDFCBK
+    sms: "Update! INR 92,000.00 deposited in HDFC Bank A/c XX4321 on 01-SEP-26 for NEFT Cr-CITI0000001-ACME TECHNOLOGIES PVT LTD-SALARY SEP26.Avl bal INR 1,05,234.00. Cheque deposits in A/C are subject to clearing"
+    expect: {pattern_id: hdfc_credit, amount_paise: 9200000, account_last4: "4321", merchant_raw: "NEFT Cr-CITI0000001-ACME TECHNOLOGIES PVT LTD-SALARY SEP26", txn_date: 2026-09-01, direction: credit, reference: null}
+  - sender: VK-HDFCBK
+    sms: "UPDATE: INR 8,795.00 debited from HDFC Bank XX4321 on 10-SEP-26. Info: NACH-DR-BAJAJ FINANCE LTD. Avl bal:INR 45,000.00"
+    expect: {pattern_id: hdfc_mandate_debit, amount_paise: 879500, account_last4: "4321", merchant_raw: "NACH-DR-BAJAJ FINANCE LTD", txn_date: 2026-09-10, direction: debit, reference: null}
+  - sender: JD-ICICIB
+    sms: "ICICI Bank Acct XX7788 debited for Rs 1,250.00 on 05-Sep-26; ZOMATO credited. UPI:412345678902. Call 18002662 for dispute. SMS BLOCK 7788 to 9215676766."
+    expect: {pattern_id: icici_upi_debit, amount_paise: 125000, account_last4: "7788", merchant_raw: ZOMATO, txn_date: 2026-09-05, direction: debit, reference: "412345678902"}
+  - sender: JM-ICICIT
+    sms: "Dear Customer, Acct XX7788 is credited with Rs 6,000.00 on 02-Sep-26 from PRIYA S. UPI:412345678905-ICICI Bank."
+    expect: {pattern_id: icici_upi_credit, amount_paise: 600000, account_last4: "7788", merchant_raw: "PRIYA S", txn_date: 2026-09-02, direction: credit, reference: "412345678905"}
+  - sender: BZ-SBIUPI
+    sms: "Dear UPI user A/C X1234 debited by 250.0 on date 12Sep26 trf to SHREE SAI KIRANA Refno 412345678903. If not u? call 1800111109. -SBI"
+    expect: {pattern_id: sbi_upi_debit, amount_paise: 25000, account_last4: "1234", merchant_raw: SHREE SAI KIRANA, txn_date: 2026-09-12, direction: debit, reference: "412345678903"}
+  - sender: AX-AXISBK
+    sms: "Spent INR 2,499\nAxis Bank Card no. XX9012\n12-09-26 19:22:10 IST\nAMAZON\nAvl Limit: INR 85,000.50\nNot you? SMS BLOCK 9012 to 919951860002"
+    expect: {pattern_id: axis_card_spend, amount_paise: 249900, account_last4: "9012", merchant_raw: AMAZON, txn_date: 2026-09-12, direction: debit, reference: null}
+  - sender: VM-KOTAKB
+    sms: "Sent Rs.300.00 from Kotak Bank AC X5566 to rahul.k@okaxis on 12-09-26.UPI Ref 412345678904. Not you, https://kotak.com/KBANKT/Fraud"
+    expect: {pattern_id: kotak_upi_debit, amount_paise: 30000, account_last4: "5566", merchant_raw: rahul.k@okaxis, txn_date: 2026-09-12, direction: debit, reference: "412345678904"}
+negative:
+  - {sender: VM-HDFCBK, sms: "OTP is 482913 for txn of INR 2,499.00 at AMAZON on HDFC Bank card ending 9012. Valid till 19:32. Do not share OTP for security reasons"}
+  - {sender: AD-ICICIB, sms: "Get a pre-approved Personal Loan of Rs 5,00,000 at attractive rates! Click https://icici.co/pl to apply. T&C apply."}
+  - {sender: VM-HDFCBK, sms: "Your HDFC Bank Credit Card XX9012 statement is ready. Total due Rs.63,450.00, min due Rs.3,170.00, due date 08-Oct-26."}
